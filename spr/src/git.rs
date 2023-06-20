@@ -10,13 +10,26 @@ use std::collections::{HashSet, VecDeque};
 use crate::{
     config::Config,
     error::{Error, Result, ResultExt},
-    github::GitHubBranch,
+    github::{GitHubBranch, PullRequest},
     message::{
         build_commit_message, parse_message, MessageSection, MessageSectionsMap,
     },
     utils::run_command,
 };
 use git2::Oid;
+use tokio::task::JoinHandle;
+
+#[derive(Debug)]
+pub struct CommitOption {
+    pub message: String,
+    pub index: isize,
+}
+
+impl std::fmt::Display for CommitOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
 
 #[derive(Debug)]
 pub struct PreparedCommit {
@@ -25,6 +38,7 @@ pub struct PreparedCommit {
     pub parent_oid: Oid,
     pub message: MessageSectionsMap,
     pub pull_request_number: Option<u64>,
+    pub pull_request_task: Option<JoinHandle<Result<PullRequest>>>,
 }
 
 #[derive(Clone)]
@@ -56,10 +70,11 @@ impl Git {
     pub fn get_prepared_commits(
         &self,
         config: &Config,
+        gh: Option<&crate::github::GitHub>,
     ) -> Result<Vec<PreparedCommit>> {
         self.get_commit_oids(config.master_ref.local())?
             .into_iter()
-            .map(|oid| self.prepare_commit(config, oid))
+            .map(|oid| self.prepare_commit(config, oid, gh))
             .collect()
     }
 
@@ -274,6 +289,7 @@ impl Git {
         &self,
         config: &Config,
         oid: Oid,
+        gh: Option<&crate::github::GitHub>,
     ) -> Result<PreparedCommit> {
         let repo = self.repo();
         let commit = repo.find_commit(oid)?;
@@ -307,12 +323,20 @@ impl Git {
             message.remove(&MessageSection::PullRequest);
         }
 
+        let pull_request_task =
+            if let (Some(number), Some(gh)) = (pull_request_number, gh) {
+                Some(tokio::spawn(gh.clone().get_pull_request(number)))
+            } else {
+                None
+            };
+
         Ok(PreparedCommit {
             oid,
             short_id,
             parent_oid,
             message,
             pull_request_number,
+            pull_request_task,
         })
     }
 

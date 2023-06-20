@@ -31,7 +31,7 @@ pub async fn land(
     config: &crate::config::Config,
 ) -> Result<()> {
     git.check_no_uncommitted_changes()?;
-    let mut prepared_commits = git.get_prepared_commits(config)?;
+    let mut prepared_commits = git.get_prepared_commits(config, None)?;
 
     let based_on_unlanded_commits = prepared_commits.len() > 1;
 

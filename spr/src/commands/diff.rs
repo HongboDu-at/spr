@@ -5,13 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use std::iter::zip;
-
 use crate::{
     error::{add_error, Error, Result, ResultExt},
-    git::PreparedCommit,
+    git::{CommitOption, PreparedCommit},
     github::{
-        GitHub, PullRequest, PullRequestRequestReviewers, PullRequestState,
+        GitHub, PullRequestRequestReviewers, PullRequestState,
         PullRequestUpdate,
     },
     message::{validate_commit_message, MessageSection},
@@ -20,6 +18,10 @@ use crate::{
 };
 use git2::Oid;
 use indoc::{formatdoc, indoc};
+use inquire::Select;
+
+const MAIN_SPECIAL_COMMIT_INDEX: isize = -1;
+const UNKNOWN_PR_SPECIAL_COMMIT_INDEX: isize = -2;
 
 #[derive(Debug, clap::Parser)]
 pub struct DiffOptions {
@@ -66,7 +68,8 @@ pub async fn diff(
     let mut result = Ok(());
 
     // Look up the commits on the local branch
-    let mut prepared_commits = git.get_prepared_commits(config)?;
+    let mut prepared_commits = git.get_prepared_commits(config, Some(gh))?;
+    let length = prepared_commits.len();
 
     // The parent of the first commit in the list is the commit on master that
     // the local branch is based on
@@ -77,37 +80,13 @@ pub async fn diff(
         return result;
     };
 
-    if !opts.all {
-        // Remove all prepared commits from the vector but the last. So, if
-        // `--all` is not given, we only operate on the HEAD commit.
-        prepared_commits.drain(0..prepared_commits.len() - 1);
-    }
-
-    #[allow(clippy::needless_collect)]
-    let pull_request_tasks: Vec<_> = prepared_commits
-        .iter()
-        .map(|pc: &PreparedCommit| {
-            pc.pull_request_number
-                .map(|number| tokio::spawn(gh.clone().get_pull_request(number)))
-        })
-        .collect();
-
     let mut message_on_prompt = "".to_string();
+    let start_index = if opts.all { 0 } else { length - 1 };
 
-    for (prepared_commit, pull_request_task) in
-        zip(prepared_commits.iter_mut(), pull_request_tasks.into_iter())
-    {
+    for index in start_index..length {
         if result.is_err() {
             break;
         }
-
-        let pull_request = if let Some(task) = pull_request_task {
-            Some(task.await??)
-        } else {
-            None
-        };
-
-        write_commit_title(prepared_commit)?;
 
         // The further implementation of the diff command is in a separate function.
         // This makes it easier to run the code to update the local commit message
@@ -119,9 +98,9 @@ pub async fn diff(
             git,
             gh,
             config,
-            prepared_commit,
+            &mut prepared_commits,
             master_base_oid,
-            pull_request,
+            index,
         )
         .await;
     }
@@ -143,18 +122,99 @@ async fn diff_impl(
     git: &crate::git::Git,
     gh: &mut crate::github::GitHub,
     config: &crate::config::Config,
-    local_commit: &mut PreparedCommit,
+    prepared_commits: &mut Vec<PreparedCommit>,
     master_base_oid: Oid,
-    pull_request: Option<PullRequest>,
+    index: usize,
 ) -> Result<()> {
-    // base_ref is either the provided base branch or the configured master branch
+    write_commit_title(&prepared_commits.get_mut(index).unwrap())?;
+
+    let pull_request = if let Some(task) =
+        &mut prepared_commits.get_mut(index).unwrap().pull_request_task
+    {
+        Some(task.await??)
+    } else {
+        None
+    };
+
     let base_ref = if let Some(base) = &opts.base {
         config.new_github_branch(base)
     } else if let Some(pull_request) = &pull_request {
         pull_request.base.clone()
     } else {
-        config.master_ref.clone()
+        let mut options: Vec<CommitOption> = Vec::new();
+
+        for i in (0..index).rev() {
+            let commit = prepared_commits.get(i).unwrap();
+            let title = commit
+                .message
+                .get(&MessageSection::Title)
+                .map(|t| &t[..])
+                .unwrap_or("(untitled)");
+            options.push(
+                if let Some(pull_request_number) = commit.pull_request_number {
+                    CommitOption {
+                        message: format!(
+                            "PR #{} - {}",
+                            pull_request_number, title
+                        ),
+                        index: i as isize,
+                    }
+                } else {
+                    CommitOption {
+                        message: format!("PR #{} - {}", "?????", title),
+                        index: UNKNOWN_PR_SPECIAL_COMMIT_INDEX,
+                    }
+                },
+            );
+        }
+        options.push(CommitOption {
+            message: config.master_ref.branch_name().to_string(),
+            index: MAIN_SPECIAL_COMMIT_INDEX,
+        });
+
+        let ans = Select::new("Select a base:", options)
+            .with_starting_cursor(index)
+            .prompt();
+
+        match ans {
+            Ok(choice) => match choice.index {
+                MAIN_SPECIAL_COMMIT_INDEX => config.master_ref.clone(),
+                UNKNOWN_PR_SPECIAL_COMMIT_INDEX => {
+                    return Err(Error::new(
+                        "Your selection obviously has no PR created yet"
+                            .to_string(),
+                    ));
+                }
+                choice_index => {
+                    let pull_request = if let Some(task) = &mut prepared_commits
+                        .get_mut(choice_index as usize)
+                        .unwrap()
+                        .pull_request_task
+                    {
+                        Some(task.await??)
+                    } else {
+                        None
+                    };
+                    match pull_request {
+                        Some(pull_request) => pull_request.head,
+                        None => {
+                            return Err(Error::new(
+                                "Could not find a PR for your selection"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+            },
+            Err(_) => {
+                return Err(Error::new(
+                    "Aborted as per user request".to_string(),
+                ));
+            }
+        }
     };
+
+    let local_commit = prepared_commits.get_mut(index).unwrap();
 
     // Update master_base_oid if base if provided
     let master_base_oid = git

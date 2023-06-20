@@ -32,7 +32,7 @@ pub async fn close(
 ) -> Result<()> {
     let mut result = Ok(());
 
-    let mut prepared_commits = git.get_prepared_commits(config)?;
+    let mut prepared_commits = git.get_prepared_commits(config, None)?;
 
     if prepared_commits.is_empty() {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;
