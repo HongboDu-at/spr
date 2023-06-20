@@ -45,6 +45,13 @@ pub struct DiffOptions {
     /// on any intermediate changes between the master branch and this commit.
     #[clap(long)]
     cherry_pick: bool,
+
+    /// PR base branch name. Use this and --cherry-pick together to
+    /// cherry-pick a PR on top of another PR branch. This avoids
+    /// creating an intermediate base branch.
+    /// Example: spr diff --cherry-pick --base <branch-name>
+    #[clap(long, short = 'b')]
+    base: Option<String>,
 }
 
 pub async fn diff(
@@ -140,6 +147,18 @@ async fn diff_impl(
     master_base_oid: Oid,
     pull_request: Option<PullRequest>,
 ) -> Result<()> {
+    // base_ref is either the provided base branch or the configured master branch
+    let base_ref = if let Some(base) = &opts.base {
+        config.new_github_branch(base)
+    } else {
+        config.master_ref.clone()
+    };
+
+    // Update master_base_oid if base if provided
+    let master_base_oid = git
+        .resolve_reference(base_ref.local())
+        .unwrap_or(master_base_oid);
+
     // Parsed commit message of the local commit
     let message = &mut local_commit.message;
 
@@ -170,7 +189,7 @@ async fn diff_impl(
         if index.has_conflicts() {
             return Err(Error::new(formatdoc!(
                 "This commit cannot be cherry-picked on {master}.",
-                master = config.master_ref.branch_name(),
+                master = base_ref.branch_name(),
             )));
         }
 
@@ -306,8 +325,7 @@ async fn diff_impl(
         if let Some(pr) = &pull_request {
             let pr_head_tree = git.get_tree_oid_for_commit(pr.head_oid)?;
 
-            let current_master_oid =
-                git.resolve_reference(config.master_ref.local())?;
+            let current_master_oid = git.resolve_reference(base_ref.local())?;
             let pr_base_oid =
                 git.repo().merge_base(pr.head_oid, pr.base_oid)?;
             let pr_base_tree = git.get_tree_oid_for_commit(pr_base_oid)?;
@@ -373,7 +391,8 @@ async fn diff_impl(
     // Check if there is a base branch on GitHub already. That's the case when
     // there is an existing Pull Request, and its base is not the master branch.
     let base_branch = if let Some(ref pr) = pull_request {
-        if pr.base.is_master_branch() {
+        if pr.base.is_master_branch() || opts.base.is_some() || opts.cherry_pick
+        {
             None
         } else {
             Some(pr.base.clone())
@@ -594,6 +613,12 @@ async fn diff_impl(
                     Some(base_branch.branch_name().to_string());
             }
         } else {
+            if let Some(base) = &opts.base {
+                if pull_request.base.branch_name() != base {
+                    pull_request_updates.base = Some(base.clone());
+                }
+            }
+
             // The Pull Request is against the master branch. In that case we
             // only need to push the update to the Pull Request branch.
             run_command(&mut cmd)
@@ -629,7 +654,7 @@ async fn diff_impl(
                 message,
                 base_branch
                     .as_ref()
-                    .unwrap_or(&config.master_ref)
+                    .unwrap_or(&base_ref)
                     .branch_name()
                     .to_string(),
                 pull_request_branch.branch_name().to_string(),
