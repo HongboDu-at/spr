@@ -150,6 +150,8 @@ async fn diff_impl(
     // base_ref is either the provided base branch or the configured master branch
     let base_ref = if let Some(base) = &opts.base {
         config.new_github_branch(base)
+    } else if let Some(pull_request) = &pull_request {
+        pull_request.base.clone()
     } else {
         config.master_ref.clone()
     };
