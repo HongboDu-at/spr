@@ -17,7 +17,7 @@ use crate::{
     utils::{parse_name_list, remove_all_parens, run_command},
 };
 use git2::Oid;
-use indoc::{formatdoc, indoc};
+use indoc::formatdoc;
 use inquire::Select;
 
 const MAIN_SPECIAL_COMMIT_INDEX: isize = -1;
@@ -290,20 +290,6 @@ async fn diff_impl(
             let mut pull_request_updates: PullRequestUpdate =
                 Default::default();
             pull_request_updates.update_message(pull_request, message);
-
-            if !pull_request_updates.is_empty() {
-                output(
-                    "⚠️",
-                    indoc!(
-                        "The Pull Request's title/message differ from the \
-                         local commit's message.
-                         Use `spr diff --update-message` to overwrite the \
-                         title and message on GitHub with the local message, \
-                         or `spr amend` to go the other way (rewrite the local \
-                         commit message with what is on GitHub)."
-                    ),
-                )?;
-            }
         }
     }
 
