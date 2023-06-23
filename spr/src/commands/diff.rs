@@ -44,15 +44,18 @@ pub struct DiffOptions {
     #[clap(long, short = 'm')]
     message: Option<String>,
 
-    /// Submit this commit as if it was cherry-picked on master. Do not base it
-    /// on any intermediate changes between the master branch and this commit.
+    /// Submit this commit and do not cherry-pick it onto any GitHub branch.
+    /// An intermediate branch for the parent commit will be created as the
+    /// base branch for the PR. Note: Once a PR is created with this option,
+    /// this is also needed every time a PR is updated, otherwise the
+    /// base branch on GitHub will not be updated with the parent commit
     #[clap(long)]
-    cherry_pick: bool,
+    no_cherry_pick: bool,
 
-    /// PR base branch name. Use this and --cherry-pick together to
-    /// cherry-pick a PR on top of another PR branch. This avoids
-    /// creating an intermediate base branch.
-    /// Example: spr diff --cherry-pick --base <branch-name>
+    /// PR base branch name. Use this to cherry-pick a PR on top of another
+    /// PR branch instead of on top of the master branch. This avoids
+    /// creating an intermediate base branch for stacked PRs.
+    /// Example: spr diff --base <branch-name>
     #[clap(long, short = 'b')]
     base: Option<String>,
 }
@@ -259,22 +262,11 @@ async fn diff_impl(
     // Parsed commit message of the local commit
     let message = &mut local_commit.message;
 
-    // Check if the local commit is based directly on the master branch.
-    let directly_based_on_master = local_commit.parent_oid == master_base_oid;
-
     // Determine the trees the Pull Request branch and the base branch should
     // have when we're done here.
-    let (new_head_tree, new_base_tree) = if !opts.cherry_pick
-        || directly_based_on_master
-    {
-        // Unless the user tells us to --cherry-pick, these should be the trees
+    let (new_head_tree, new_base_tree) = if opts.no_cherry_pick {
+        // If the user tells us not to cherry-pick, these should be the trees
         // of the current commit and its parent.
-        // If the current commit is directly based on master (i.e.
-        // directly_based_on_master is true), then we can do this here even when
-        // the user tells us to --cherry-pick, because we would cherry pick the
-        // current commit onto its parent, which gives us the same tree as the
-        // current commit has, and the master base is the same as this commit's
-        // parent.
         let head_tree = git.get_tree_oid_for_commit(local_commit.oid)?;
         let base_tree = git.get_tree_oid_for_commit(local_commit.parent_oid)?;
 
@@ -471,10 +463,12 @@ async fn diff_impl(
         }
     }
 
-    // Check if there is a base branch on GitHub already. That's the case when
-    // there is an existing Pull Request, and its base is not the master branch.
+    // Check if there is a intermediate base branch on GitHub already. That's the case when
+    // there is an existing Pull Request, and its base is not the master branch or other PR's branch.
     let base_branch = if let Some(ref pr) = pull_request {
-        if pr.base.is_master_branch() || opts.base.is_some() || opts.cherry_pick
+        if pr.base.is_master_branch()
+            || opts.base.is_some()
+            || !opts.no_cherry_pick
         {
             None
         } else {
@@ -529,9 +523,7 @@ async fn diff_impl(
     {
         // Case 1
         (None, base_branch)
-    } else if base_branch.is_none()
-        && (directly_based_on_master || opts.cherry_pick)
-    {
+    } else if base_branch.is_none() && !opts.no_cherry_pick {
         // Case 2
         (Some(master_base_oid), None)
     } else {
