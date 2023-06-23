@@ -55,7 +55,9 @@ pub struct DiffOptions {
     /// PR base branch name. Use this to cherry-pick a PR on top of another
     /// PR branch instead of on top of the master branch. This avoids
     /// creating an intermediate base branch for stacked PRs.
-    /// Example: spr diff --base <branch-name>
+    /// Example: spr diff --base <branch-name>. A special HEAD can be
+    /// used to indicate that a parent commit should be used as the base.
+    /// For example: spr diff --base HEAD^1
     #[clap(long, short = 'b')]
     base: Option<String>,
 }
@@ -175,9 +177,24 @@ async fn diff_impl(
     };
 
     let base_ref = if let Some(base) = &opts.base {
-        config.new_github_branch(base)
+        let diff = parse_parent_or_zero(base);
+        if diff == 0 {
+            config.new_github_branch(base)
+        } else {
+            let base_index = index as isize - diff;
+            if base_index < 0 {
+                config.master_ref.clone()
+            } else if base_index >= index as isize {
+                return Err(Error::new("Invalid base".to_string()));
+            } else {
+                get_github_branch_for_index(prepared_commits, base_index)
+                    .await?
+            }
+        }
     } else if let Some(pull_request) = &pull_request {
         pull_request.base.clone()
+    } else if index == 0 {
+        config.master_ref.clone()
     } else {
         let mut options: Vec<CommitOption> = Vec::new();
 
@@ -224,24 +241,8 @@ async fn diff_impl(
                     ));
                 }
                 choice_index => {
-                    let pull_request = if let Some(task) = &mut prepared_commits
-                        .get_mut(choice_index as usize)
-                        .unwrap()
-                        .pull_request_task
-                    {
-                        Some(task.await??)
-                    } else {
-                        None
-                    };
-                    match pull_request {
-                        Some(pull_request) => pull_request.head,
-                        None => {
-                            return Err(Error::new(
-                                "Could not find a PR for your selection"
-                                    .to_string(),
-                            ));
-                        }
-                    }
+                    get_github_branch_for_index(prepared_commits, choice_index)
+                        .await?
                 }
             },
             Err(_) => {
@@ -764,4 +765,41 @@ async fn diff_impl(
     }
 
     Ok(())
+}
+
+async fn get_github_branch_for_index(
+    prepared_commits: &mut Vec<PreparedCommit>,
+    choice_index: isize,
+) -> Result<crate::github::GitHubBranch> {
+    let pull_request = if let Some(task) = &mut prepared_commits
+        .get_mut(choice_index as usize)
+        .unwrap()
+        .pull_request_task
+    {
+        Some(task.await??)
+    } else {
+        None
+    };
+    Ok(match pull_request {
+        Some(pull_request) => pull_request.head,
+        None => {
+            return Err(Error::new(
+                "Could not find a PR for your selection".to_string(),
+            ));
+        }
+    })
+}
+
+fn parse_parent_or_zero(s: &str) -> isize {
+    if s == "HEAD^" || s == "HEAD^" {
+        1
+    } else if s.starts_with("HEAD^") || s.starts_with("HEAD^") {
+        if let Ok(n) = s[5..].parse::<isize>() {
+            n
+        } else {
+            0
+        }
+    } else {
+        0
+    }
 }
