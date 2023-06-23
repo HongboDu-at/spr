@@ -104,7 +104,7 @@ pub async fn diff(
                         commit
                             .pull_request_number
                             .map(|n| n.to_string())
-                            .unwrap_or("?????".to_string()),
+                            .unwrap_or_else(|| "?????".to_string()),
                         title
                     ),
                     index: i as isize,
@@ -162,11 +162,11 @@ async fn diff_impl(
     git: &crate::git::Git,
     gh: &mut crate::github::GitHub,
     config: &crate::config::Config,
-    prepared_commits: &mut Vec<PreparedCommit>,
+    prepared_commits: &mut [PreparedCommit],
     master_base_oid: Oid,
     index: usize,
 ) -> Result<()> {
-    write_commit_title(&prepared_commits.get_mut(index).unwrap())?;
+    write_commit_title(prepared_commits.get_mut(index).unwrap())?;
 
     let pull_request = if let Some(task) =
         &mut prepared_commits.get_mut(index).unwrap().pull_request_task
@@ -768,7 +768,7 @@ async fn diff_impl(
 }
 
 async fn get_github_branch_for_index(
-    prepared_commits: &mut Vec<PreparedCommit>,
+    prepared_commits: &mut [PreparedCommit],
     choice_index: isize,
 ) -> Result<crate::github::GitHubBranch> {
     let pull_request = if let Some(task) = &mut prepared_commits
@@ -791,7 +791,7 @@ async fn get_github_branch_for_index(
 }
 
 fn parse_parent_or_zero(s: &str) -> isize {
-    if s == "HEAD^" || s == "HEAD^" {
+    if s == "HEAD~" || s == "HEAD^" {
         1
     } else if s.starts_with("HEAD^") || s.starts_with("HEAD^") {
         if let Ok(n) = s[5..].parse::<isize>() {
