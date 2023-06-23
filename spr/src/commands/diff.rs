@@ -18,14 +18,15 @@ use crate::{
 };
 use git2::Oid;
 use indoc::formatdoc;
-use inquire::Select;
+use inquire::{MultiSelect, Select};
 
 const MAIN_SPECIAL_COMMIT_INDEX: isize = -1;
 const UNKNOWN_PR_SPECIAL_COMMIT_INDEX: isize = -2;
 
 #[derive(Debug, clap::Parser)]
 pub struct DiffOptions {
-    /// Create/update pull requests for the whole branch, not just the HEAD commit
+    /// Open an interactive selection to select all or some commits to
+    /// create/update pull requests, not just the HEAD commit
     #[clap(long, short = 'a')]
     all: bool,
 
@@ -81,9 +82,43 @@ pub async fn diff(
     };
 
     let mut message_on_prompt = "".to_string();
-    let start_index = if opts.all { 0 } else { length - 1 };
 
-    for index in start_index..length {
+    let selected_indexes = if opts.all {
+        let options = prepared_commits
+            .iter()
+            .enumerate()
+            .map(|(i, commit)| {
+                let title = commit
+                    .message
+                    .get(&MessageSection::Title)
+                    .map(|t| &t[..])
+                    .unwrap_or("(untitled)");
+                CommitOption {
+                    message: format!(
+                        "PR #{} - {}",
+                        commit
+                            .pull_request_number
+                            .map(|n| n.to_string())
+                            .unwrap_or("?????".to_string()),
+                        title
+                    ),
+                    index: i as isize,
+                }
+            })
+            .rev()
+            .collect::<Vec<CommitOption>>();
+
+        let ans =
+            MultiSelect::new("Select commits to create/update PR:", options)
+                .prompt()?;
+
+        ans.iter().map(|x| x.index as usize).rev().collect()
+    } else {
+        vec![length - 1]
+    };
+
+    // selected_indexes is sorted from lower commits to higher commits
+    for index in selected_indexes {
         if result.is_err() {
             break;
         }
