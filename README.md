@@ -12,31 +12,53 @@ spr is pronounced /ˈsuːpəɹ/, like the English word 'super'.
 
 Comprehensive documentation is available here: https://getcord.github.io/spr/
 
+## Fork Documentation
+
+The fork spr allows users to cherry-pick a commit onto any remote branches. When creating stacked PRs, unlike the original spr creating an intermediate base branch, PR2 just uses the branch of PR1 as its bash branch. This allows PR2 to land without changing base or rerunning CI.
+
+The fork spr also adds interactive base selections for creating new PRs and interactive commit selections for bulk creating/updating PRs. It uses cherry-pick by default. Base branches on GitHub are persisted so you only need to specify the base branch when your first create a PR.
+
+### Directly use PR1 as Base Branch of PR2
+
+Add a new `--base` option for `spr diff`. This option allows users to specify an existing GitHub branch as base branch rather than creating an intermediate base branch. 
+
+`spr diff --base <branch-name>`
+
+This allows stacked PR to be mergeable on GitHub UI as if they are regular `gh` cli created stacked PRs. When the base PR lands, the base branch in stacked PR is automatically changed to main.
+
+ - If the stacked PR shows no conflicts, we do not need to rebase or rerun CI in order to merge it.
+ - If the stacked PR shows conflicts, we do not need to actually resolve any conflicts. `git pull --rebase && spr diff` will update the stacked PR. CI needs to rerun.
+
+### Interactive Base Selection for Creating New PR
+
+If `--base` is not specified for new PR or you just do not like copy/paste, running `spr diff` for creating new PR automatically prompts users to select a base branch from lower local commits. This also means users just need to run the same command `spr diff` no matter creating or updating PRs. See the selection experience [here](https://github.com/mikaelmello/inquire#select).
+
+### Interactively Select Some Commits to Create/Update PR
+
+Running `spr diff --all` prompts users to select all or some commits to create/update PRs. Pressing → key easily selects all commits when needed. This allows users to have multiple stacks in one branch and users can select the commits of a stack to update. This also allows users to update any commit in the history without using `exec spr diff` in an interactive rebase. See the multi-selection experience [here](https://github.com/mikaelmello/inquire#multiselect).
+
+### Specify Base via HEAD^ / HEAD~
+
+Select base with parent HEAD references. This is useful when you have a series of new stacked commits and you can do `spr diff --all --base HEAD^` to stack all of them. BTW, when you have a series of new independent commits and you can do `spr diff --all --base main`.
+
+`spr diff --base HEAD^`   
+`spr diff --base HEAD~2`
+
+### Base Branch Persistence
+
+Users only need to specify a base branch when creating a PR. Updating an existing PR will continue to use the same base branch on GitHub. If needed, existing PR’s base branches can be changed with `--base`.
+
+### Cherry-pick by Default
+
+Use cherry-pick by default. Add `--no-cherry-pick` to keep original features.
+
+### Disable Prompts for Title/Message differences
+
+Almost all the time users update PR summary in GitHub directly. Some workflow has no point in keeping them in sync. So the fork  does not prompt when title/message differ.
+
 ## Installation
 
-### Binary Installation
-
-#### Using Homebrew
-
-```shell
-brew install spr
-```
-
-#### Using Nix
-
-```shell
-nix-channel --update && nix-env -i spr
-```
-
-#### Using Cargo
-
-If you have Cargo installed (the Rust build tool), you can install spr by running
-
-```shell
-cargo install spr
-```
-
-### Install from Source
+### The only way to install the fork is from Source
 
 spr is written in Rust. You need a Rust toolchain to build from source. See [rustup.rs](https://rustup.rs) for information on how to install Rust if you have not got a Rust toolchain on your system already.
 
