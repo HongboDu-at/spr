@@ -134,7 +134,7 @@ pub async fn spr() -> Result<()> {
     let require_test_plan = git_config
         .get_bool("spr.requireTestPlan")
         .ok()
-        .unwrap_or(true);
+        .unwrap_or(false);
 
     let config = spr::config::Config::new(
         github_owner,
