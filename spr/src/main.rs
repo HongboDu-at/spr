@@ -58,6 +58,10 @@ enum Commands {
     /// current HEAD commit
     Diff(commands::diff::DiffOptions),
 
+    /// Merge Pull Request on GitHub that is created from the current HEAD
+    /// commit
+    Merge(commands::merge::MergeOptions),
+
     /// Reformat commit message
     Format(commands::format::FormatOptions),
 
@@ -185,6 +189,9 @@ pub async fn spr() -> Result<()> {
     match cli.command {
         Commands::Diff(opts) => {
             commands::diff::diff(opts, &git, &mut gh, &config).await?
+        }
+        Commands::Merge(opts) => {
+            commands::merge::merge(opts, &git, &config).await?
         }
         Commands::Land(opts) => {
             commands::land::land(opts, &git, &mut gh, &config).await?

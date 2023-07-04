@@ -12,4 +12,5 @@ pub mod format;
 pub mod init;
 pub mod land;
 pub mod list;
+pub mod merge;
 pub mod patch;
