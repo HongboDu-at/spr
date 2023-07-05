@@ -176,25 +176,32 @@ async fn diff_impl(
         None
     };
 
-    let base_ref = if let Some(base) = &opts.base {
+    let (base_ref, base_pull_request_number) = if let Some(base) = &opts.base {
         let diff = parse_parent_or_zero(base);
         if diff == 0 {
-            config.new_github_branch(base)
+            let base_pull_request_number_result =
+                gh.get_open_pull_request_number_for_head(base.clone()).await;
+            (
+                config.new_github_branch(base),
+                base_pull_request_number_result.ok(),
+            )
         } else {
             let base_index = index as isize - diff;
             if base_index < 0 {
-                config.master_ref.clone()
+                (config.master_ref.clone(), None)
             } else if base_index >= index as isize {
                 return Err(Error::new("Invalid base".to_string()));
             } else {
-                get_github_branch_for_index(prepared_commits, base_index)
-                    .await?
+                let pull_request =
+                    get_pull_request_for_index(prepared_commits, base_index)
+                        .await?;
+                (pull_request.head, Some(pull_request.number))
             }
         }
     } else if let Some(pull_request) = &pull_request {
-        pull_request.base.clone()
+        (pull_request.base.clone(), None)
     } else if index == 0 {
-        config.master_ref.clone()
+        (config.master_ref.clone(), None)
     } else {
         let mut options: Vec<CommitOption> = Vec::new();
 
@@ -233,7 +240,7 @@ async fn diff_impl(
 
         match ans {
             Ok(choice) => match choice.index {
-                MAIN_SPECIAL_COMMIT_INDEX => config.master_ref.clone(),
+                MAIN_SPECIAL_COMMIT_INDEX => (config.master_ref.clone(), None),
                 UNKNOWN_PR_SPECIAL_COMMIT_INDEX => {
                     return Err(Error::new(
                         "Your selection obviously has no PR created yet"
@@ -241,8 +248,12 @@ async fn diff_impl(
                     ));
                 }
                 choice_index => {
-                    get_github_branch_for_index(prepared_commits, choice_index)
-                        .await?
+                    let pull_request = get_pull_request_for_index(
+                        prepared_commits,
+                        choice_index,
+                    )
+                    .await?;
+                    (pull_request.head, Some(pull_request.number))
                 }
             },
             Err(_) => {
@@ -262,6 +273,14 @@ async fn diff_impl(
 
     // Parsed commit message of the local commit
     let message = &mut local_commit.message;
+
+    // If the user has provided a base PR, add a "Depends On" line in PR body
+    if let Some(base_pull_request_number) = base_pull_request_number {
+        message.insert(
+            MessageSection::BasePR,
+            format!("\n- #{}", base_pull_request_number),
+        );
+    }
 
     // Determine the trees the Pull Request branch and the base branch should
     // have when we're done here.
@@ -767,10 +786,10 @@ async fn diff_impl(
     Ok(())
 }
 
-async fn get_github_branch_for_index(
+async fn get_pull_request_for_index(
     prepared_commits: &mut [PreparedCommit],
     choice_index: isize,
-) -> Result<crate::github::GitHubBranch> {
+) -> Result<crate::github::PullRequest> {
     let pull_request = if let Some(task) = &mut prepared_commits
         .get_mut(choice_index as usize)
         .unwrap()
@@ -781,10 +800,10 @@ async fn get_github_branch_for_index(
         None
     };
     Ok(match pull_request {
-        Some(pull_request) => pull_request.head,
+        Some(pull_request) => pull_request,
         None => {
             return Err(Error::new(
-                "Could not find a PR for your selection".to_string(),
+                "Could not find a PR for the base".to_string(),
             ));
         }
     })

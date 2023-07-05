@@ -27,6 +27,12 @@ When creating stacked PRs, unlike the original spr creating an intermediate base
  - If the stacked PR shows no conflicts, we do not need to rebase or rerun CI in order to merge it.
  - If the stacked PR shows conflicts, we do not need to actually resolve any conflicts. `git pull --rebase && spr diff` will update the stacked PR. CI needs to rerun.
 
+### Track Base PR in the Stacked PR on GitHub
+A base PR link is automatically appended to the stacked PR’s body. GitHub automatically tracks the base PR's status.
+Stacked PR is automatically mentioned in the base PR's conversation timeline.
+
+For example, `Depends On: #<Base PR Number>`
+
 ### Interactive Base Selection for Creating New PR
 
 If `--base` is not specified for new PR or you just do not like copy/paste, running `spr diff` for creating new PR automatically prompts users to select a base branch from lower local commits. This also means users just need to run the same command `spr diff` no matter creating or updating PRs. See the selection experience [here](https://github.com/mikaelmello/inquire#select).

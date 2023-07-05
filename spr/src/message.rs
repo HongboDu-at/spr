@@ -18,6 +18,7 @@ pub enum MessageSection {
     Title,
     Summary,
     TestPlan,
+    BasePR,
     Reviewers,
     ReviewedBy,
     PullRequest,
@@ -30,6 +31,7 @@ pub fn message_section_label(section: &MessageSection) -> &'static str {
         Title => "Title",
         Summary => "Summary",
         TestPlan => "Test Plan",
+        BasePR => "Depends On",
         Reviewers => "Reviewers",
         ReviewedBy => "Reviewed By",
         PullRequest => "Pull Request",
@@ -43,6 +45,7 @@ pub fn message_section_by_label(label: &str) -> Option<MessageSection> {
         "title" => Some(Title),
         "summary" => Some(Summary),
         "test plan" => Some(TestPlan),
+        "depends on" => Some(BasePR),
         "reviewer" => Some(Reviewers),
         "reviewers" => Some(Reviewers),
         "reviewed by" => Some(ReviewedBy),
@@ -168,6 +171,7 @@ pub fn build_commit_message(section_texts: &MessageSectionsMap) -> String {
         &[
             MessageSection::Title,
             MessageSection::Summary,
+            MessageSection::BasePR,
             MessageSection::TestPlan,
             MessageSection::Reviewers,
             MessageSection::ReviewedBy,
@@ -179,7 +183,11 @@ pub fn build_commit_message(section_texts: &MessageSectionsMap) -> String {
 pub fn build_github_body(section_texts: &MessageSectionsMap) -> String {
     build_message(
         section_texts,
-        &[MessageSection::Summary, MessageSection::TestPlan],
+        &[
+            MessageSection::Summary,
+            MessageSection::BasePR,
+            MessageSection::TestPlan,
+        ],
     )
 }
 

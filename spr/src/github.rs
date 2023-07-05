@@ -365,6 +365,29 @@ impl GitHub {
         Ok(())
     }
 
+    pub async fn get_open_pull_request_number_for_head(
+        &self,
+        head_ref_name: String,
+    ) -> Result<u64> {
+        let pull_requests = octocrab::instance()
+            .pulls(self.config.owner.clone(), self.config.repo.clone())
+            .list()
+            .state(octocrab::params::State::Open)
+            .head(format!("{}:{}", self.config.owner.clone(), head_ref_name))
+            .send()
+            .await?;
+
+        let pull_request = pull_requests.into_iter().next();
+
+        match pull_request {
+            Some(pr) => Ok(pr.number),
+            None => Err(Error::new(format!(
+                "No open pull requests found for {}",
+                head_ref_name
+            ))),
+        }
+    }
+
     pub async fn request_reviewers(
         &self,
         number: u64,
