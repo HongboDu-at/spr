@@ -280,7 +280,10 @@ async fn diff_impl(
     if let Some(base_pull_request_number) = base_pull_request_number {
         message.insert(
             MessageSection::BasePR,
-            format!("\n- #{}", base_pull_request_number),
+            format!(
+                "\n- #{} (powered by [spr-enhanced](https://go/spr-enhanced))",
+                base_pull_request_number
+            ),
         );
     }
 
