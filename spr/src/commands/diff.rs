@@ -123,7 +123,7 @@ pub async fn diff(
     };
 
     // selected_indexes is sorted from lower commits to higher commits
-    for index in selected_indexes {
+    for &index in &selected_indexes {
         if result.is_err() {
             break;
         }
@@ -141,6 +141,7 @@ pub async fn diff(
             &mut prepared_commits,
             master_base_oid,
             index,
+            &selected_indexes,
         )
         .await;
     }
@@ -165,6 +166,7 @@ async fn diff_impl(
     prepared_commits: &mut [PreparedCommit],
     master_base_oid: Oid,
     index: usize,
+    selected_indexes: &[usize],
 ) -> Result<()> {
     write_commit_title(prepared_commits.get_mut(index).unwrap())?;
 
@@ -768,6 +770,15 @@ async fn diff_impl(
         )?;
 
         message.insert(MessageSection::PullRequest, pull_request_url);
+
+        // If current commit is not the last selected commit, update pull request number and task
+        // so that it can be used as a base PR for the subsequent commits.
+        if Some(&index) != selected_indexes.last() {
+            local_commit.pull_request_number = Some(pull_request_number);
+            local_commit.pull_request_task = Some(tokio::spawn(
+                gh.clone().get_pull_request(pull_request_number),
+            ));
+        }
 
         let result = gh
             .request_reviewers(pull_request_number, requested_reviewers)
