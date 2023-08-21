@@ -713,10 +713,11 @@ async fn diff_impl(
                     Some(base_branch.branch_name().to_string());
             }
         } else {
-            if let Some(base) = &opts.base {
-                if pull_request.base.branch_name() != base {
-                    pull_request_updates.base = Some(base.clone());
-                }
+            if opts.base.is_some()
+                && pull_request.base.branch_name() != base_ref.branch_name()
+            {
+                pull_request_updates.base =
+                    Some(base_ref.branch_name().to_string());
             }
 
             // The Pull Request is against the master branch. In that case we
