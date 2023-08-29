@@ -44,7 +44,7 @@ pub fn remove_all_parens(text: &str) -> String {
 
 pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
     let cmd_output = cmd
-        .stdout(Stdio::null())
+        .stdout(Stdio::inherit())
         .stderr(Stdio::piped())
         .spawn()?
         .wait_with_output()

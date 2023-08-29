@@ -60,6 +60,12 @@ pub struct DiffOptions {
     /// For example: spr diff --base HEAD^1
     #[clap(long, short = 'b')]
     base: Option<String>,
+
+    /// Add --no-verify for git push to GitHub. This is useful when you
+    /// have a pre-push hook that you want to skip.
+    /// For example: spr diff --no-verify
+    #[clap(long, short = 'n')]
+    no_verify: bool,
 }
 
 pub async fn diff(
@@ -652,12 +658,17 @@ async fn diff_impl(
     )?;
 
     let mut cmd = tokio::process::Command::new("git");
-    cmd.arg("push")
-        .arg("--atomic")
-        .arg("--no-verify")
-        .arg("--")
-        .arg(&config.remote_name)
-        .arg(format!("{}:{}", pr_commit, pull_request_branch.on_github()));
+    cmd.arg("push").arg("--atomic");
+
+    if opts.no_verify {
+        cmd.arg("--no-verify");
+    }
+
+    cmd.arg("--").arg(&config.remote_name).arg(format!(
+        "{}:{}",
+        pr_commit,
+        pull_request_branch.on_github()
+    ));
 
     if let Some(pull_request) = pull_request {
         // We are updating an existing Pull Request
