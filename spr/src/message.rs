@@ -31,7 +31,7 @@ pub fn message_section_label(section: &MessageSection) -> &'static str {
         Title => "Title",
         Summary => "Summary",
         TestPlan => "Test Plan",
-        BasePR => "Depends On",
+        BasePR => "<hr>Depends On",
         Reviewers => "Reviewers",
         ReviewedBy => "Reviewed By",
         PullRequest => "Pull Request",
