@@ -55,9 +55,9 @@ Select base with parent HEAD references. This is useful when you have a series o
 
 Users only need to specify a base branch when creating a PR. Updating an existing PR will continue to use the same base branch on GitHub. If needed, existing PR’s base branches can be changed with `--base`.
 
-### Add `spr merge`, which adds 'mergeme' label
+### Add `spr merge` to support `gh pr merge <PR_NUMBER>`
 
-This is added specific to some workflows. When invoked, 'mergeme' label is added to the PR of the HEAD commit. Similar to `spr diff --all`, `spr merge --all` prompts users to select all or some commits to merge PRs.
+When invoked, 'gh pr merge' is done for the PR of the HEAD commit. Similar to `spr diff --all`, `spr merge --all` prompts users to select all or some commits to merge.
 
 ### Cherry-pick by Default
 

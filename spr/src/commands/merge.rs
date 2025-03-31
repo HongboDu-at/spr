@@ -54,7 +54,7 @@ pub async fn merge(
                         commit
                             .pull_request_number
                             .map(|n| n.to_string())
-                            .unwrap_or_else(|| "?????".to_string()),
+                            .unwrap_or_else(|| "??????".to_string()),
                         title
                     ),
                     index: i as isize,
@@ -86,20 +86,18 @@ pub async fn merge(
             run_command(
                 tokio::process::Command::new("gh")
                     .arg("pr")
-                    .arg("edit")
+                    .arg("merge")
                     .arg(pull_request_number.to_string())
-                    .arg("--add-label")
-                    .arg("mergeme"),
             )
             .await
-            .reword("adding 'mergeme' label failed".to_string())?;
+            .reword("enabling auto-merge failed".to_string())?;
 
             let pull_request_url = config.pull_request_url(pull_request_number);
 
             output(
                 "✅",
                 &format!(
-                    "Added 'mergeme' label on Pull Request #{}: {}",
+                    "Enabled auto-merge on Pull Request #{}: {}",
                     pull_request_number, &pull_request_url,
                 ),
             )?;

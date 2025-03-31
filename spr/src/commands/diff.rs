@@ -110,7 +110,7 @@ pub async fn diff(
                         commit
                             .pull_request_number
                             .map(|n| n.to_string())
-                            .unwrap_or_else(|| "?????".to_string()),
+                            .unwrap_or_else(|| "??????".to_string()),
                         title
                     ),
                     index: i as isize,
