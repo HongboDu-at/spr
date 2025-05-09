@@ -14,7 +14,10 @@ use crate::{
     },
     message::{validate_commit_message, MessageSection},
     output::{output, write_commit_title},
-    utils::{parse_name_list, remove_all_parens, run_command},
+    utils::{
+        parse_name_list, remove_all_parens,
+        run_command_and_show_output,
+    },
 };
 use git2::Oid;
 use indoc::formatdoc;
@@ -713,7 +716,7 @@ async fn diff_impl(
 
             // Push the new commit onto the Pull Request branch (and also the
             // new base commit, if we added that to cmd above).
-            run_command(&mut cmd)
+            run_command_and_show_output(&mut cmd)
                 .await
                 .reword("git push failed".to_string())?;
 
@@ -733,7 +736,7 @@ async fn diff_impl(
 
             // The Pull Request is against the master branch. In that case we
             // only need to push the update to the Pull Request branch.
-            run_command(&mut cmd)
+            run_command_and_show_output(&mut cmd)
                 .await
                 .reword("git push failed".to_string())?;
         }
@@ -756,7 +759,7 @@ async fn diff_impl(
             ));
         }
         // Push the pull request branch and the base branch if present
-        run_command(&mut cmd)
+        run_command_and_show_output(&mut cmd)
             .await
             .reword("git push failed".to_string())?;
 

@@ -42,9 +42,16 @@ pub fn remove_all_parens(text: &str) -> String {
     lazy_regex::regex!(r#"[()]"#).replace_all(text, "").into()
 }
 
-pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
+async fn run_command_with_output(
+    cmd: &mut tokio::process::Command,
+    show_stdout: bool,
+) -> Result<()> {
     let cmd_output = cmd
-        .stdout(Stdio::null())
+        .stdout(if show_stdout {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
         .stderr(Stdio::piped())
         .spawn()?
         .wait_with_output()
@@ -56,6 +63,14 @@ pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
+    run_command_with_output(cmd, false).await
+}
+
+pub async fn run_command_and_show_output(cmd: &mut tokio::process::Command) -> Result<()> {
+    run_command_with_output(cmd, true).await
 }
 
 #[cfg(test)]
