@@ -42,16 +42,28 @@ pub fn remove_all_parens(text: &str) -> String {
     lazy_regex::regex!(r#"[()]"#).replace_all(text, "").into()
 }
 
-async fn run_command_with_output(
+/// Run command with both stdout and stderr streaming live to the terminal.
+/// This is useful for commands like git push where you want to see hook output in real-time.
+pub async fn run_command_with_live_output(
     cmd: &mut tokio::process::Command,
-    show_stdout: bool,
 ) -> Result<()> {
+    let status = cmd
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?
+        .wait()
+        .await?;
+
+    if !status.success() {
+        return Err(Error::new("command failed"));
+    }
+
+    Ok(())
+}
+
+pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
     let cmd_output = cmd
-        .stdout(if show_stdout {
-            Stdio::inherit()
-        } else {
-            Stdio::null()
-        })
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?
         .wait_with_output()
@@ -63,14 +75,6 @@ async fn run_command_with_output(
     }
 
     Ok(())
-}
-
-pub async fn run_command(cmd: &mut tokio::process::Command) -> Result<()> {
-    run_command_with_output(cmd, false).await
-}
-
-pub async fn run_command_and_show_output(cmd: &mut tokio::process::Command) -> Result<()> {
-    run_command_with_output(cmd, true).await
 }
 
 #[cfg(test)]
