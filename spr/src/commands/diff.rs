@@ -14,10 +14,7 @@ use crate::{
     },
     message::{validate_commit_message, MessageSection},
     output::{output, write_commit_title},
-    utils::{
-        parse_name_list, remove_all_parens,
-        run_command_with_live_output,
-    },
+    utils::{parse_name_list, remove_all_parens, run_command_with_live_output},
 };
 use git2::Oid;
 use indoc::formatdoc;

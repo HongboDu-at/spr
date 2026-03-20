@@ -87,7 +87,7 @@ pub async fn merge(
                 tokio::process::Command::new("gh")
                     .arg("pr")
                     .arg("merge")
-                    .arg(pull_request_number.to_string())
+                    .arg(pull_request_number.to_string()),
             )
             .await
             .reword("enabling auto-merge failed".to_string())?;

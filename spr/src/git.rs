@@ -17,7 +17,30 @@ use crate::{
     utils::run_command,
 };
 use git2::Oid;
+use git2_ext::ops::Sign;
 use tokio::task::JoinHandle;
+
+/// Read the repo's signing config and return a `UserSign` if signing is
+/// enabled (`commit.gpgsign = true`).  Errors initialising the signer are
+/// printed to stderr and treated as "signing disabled" so that spr remains
+/// usable even when the signing key is temporarily unavailable.
+fn load_signer(repo: &git2::Repository) -> Option<git2_ext::ops::UserSign> {
+    let config = repo.config().ok()?;
+    if !config.get_bool("commit.gpgsign").unwrap_or(false) {
+        return None;
+    }
+    match git2_ext::ops::UserSign::from_config(repo, &config) {
+        Ok(sign) => Some(sign),
+        Err(e) => {
+            eprintln!("spr: warning: failed to initialize commit signing: {e}");
+            None
+        }
+    }
+}
+
+fn signer_ref(sign: &Option<git2_ext::ops::UserSign>) -> Option<&dyn Sign> {
+    sign.as_ref().map(|s| s as &dyn Sign)
+}
 
 #[derive(Debug)]
 pub struct CommitOption {
@@ -92,6 +115,7 @@ impl Git {
         let mut message: String;
         let first_parent = commits[0].parent_oid;
         let repo = self.repo();
+        let sign = load_signer(&repo);
 
         for prepared_commit in commits.iter_mut() {
             let commit = repo.find_commit(prepared_commit.oid)?;
@@ -110,13 +134,17 @@ impl Git {
             limit = limit.map(|n| if n > 0 { n - 1 } else { 0 });
 
             if updating {
-                let new_oid = repo.commit(
-                    None,
+                let tree = commit.tree()?;
+                let parent_commit =
+                    repo.find_commit(parent_oid.unwrap_or(first_parent))?;
+                let new_oid = git2_ext::ops::commit(
+                    &repo,
                     &commit.author(),
                     &commit.committer(),
-                    &message[..],
-                    &commit.tree()?,
-                    &[&repo.find_commit(parent_oid.unwrap_or(first_parent))?],
+                    &message,
+                    &tree,
+                    &[&parent_commit],
+                    signer_ref(&sign),
                 )?;
                 prepared_commit.oid = new_oid;
                 parent_oid = Some(new_oid);
@@ -145,6 +173,7 @@ impl Git {
             return Ok(());
         }
         let repo = self.repo();
+        let sign = load_signer(&repo);
 
         for prepared_commit in commits.iter_mut() {
             let new_parent_commit = repo.find_commit(new_parent_oid)?;
@@ -164,13 +193,14 @@ impl Git {
             }
             let tree = repo.find_tree(tree_oid)?;
 
-            new_parent_oid = repo.commit(
-                None,
+            new_parent_oid = git2_ext::ops::commit(
+                &repo,
                 &commit.author(),
                 &commit.committer(),
                 String::from_utf8_lossy(commit.message_bytes()).as_ref(),
                 &tree,
                 &[&new_parent_commit],
+                signer_ref(&sign),
             )?;
         }
 
@@ -445,6 +475,7 @@ impl Git {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let parent_refs = parents.iter().collect::<Vec<_>>();
         let message = git2::message_prettify(message, None)?;
+        let sign = load_signer(&repo);
 
         // The committer signature should be the default signature (i.e. the
         // current user - as configured in Git as `user.name` and `user.email` -
@@ -475,13 +506,14 @@ impl Git {
                 .as_ref(),
         )?;
 
-        let oid = repo.commit(
-            None,
+        let oid = git2_ext::ops::commit(
+            &repo,
             &author,
             &committer,
             &message,
             &tree,
             &parent_refs[..],
+            signer_ref(&sign),
         )?;
 
         Ok(oid)
