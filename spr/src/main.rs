@@ -65,9 +65,6 @@ enum Commands {
     /// Reformat commit message
     Format(commands::format::FormatOptions),
 
-    /// Land a reviewed Pull Request
-    Land(commands::land::LandOptions),
-
     /// Update local commit message with content on GitHub
     Amend(commands::amend::AmendOptions),
 
@@ -192,9 +189,6 @@ pub async fn spr() -> Result<()> {
         }
         Commands::Merge(opts) => {
             commands::merge::merge(opts, &git, &config).await?
-        }
-        Commands::Land(opts) => {
-            commands::land::land(opts, &git, &mut gh, &config).await?
         }
         Commands::Amend(opts) => {
             commands::amend::amend(opts, &git, &mut gh, &config).await?
