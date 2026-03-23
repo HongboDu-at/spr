@@ -13,3 +13,4 @@ pub mod init;
 pub mod list;
 pub mod merge;
 pub mod patch;
+pub mod sync;

@@ -7,7 +7,7 @@
 
 use crate::{
     error::{add_error, Error, Result, ResultExt},
-    git::{CommitOption, PreparedCommit},
+    git::{CommitOption, Git, PreparedCommit},
     github::{
         GitHub, PullRequestRequestReviewers, PullRequestState,
         PullRequestUpdate,
@@ -81,6 +81,10 @@ pub async fn diff(
     git.check_no_uncommitted_changes()?;
 
     let mut result = Ok(());
+
+    // Pre-fetch origin/main once so that concurrent PR fetch tasks
+    // (spawned below) don't race on updating this shared ref.
+    Git::fetch_from_remote(&[&config.master_ref], &config.remote_name).await?;
 
     // Look up the commits on the local branch
     let mut prepared_commits = git.get_prepared_commits(config, Some(gh))?;

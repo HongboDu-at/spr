@@ -76,6 +76,9 @@ enum Commands {
 
     /// Close a Pull request
     Close(commands::close::CloseOptions),
+
+    /// Sync local commit stack with remote PR changes
+    Sync(commands::sync::SyncOptions),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -199,6 +202,9 @@ pub async fn spr() -> Result<()> {
         }
         Commands::Close(opts) => {
             commands::close::close(opts, &git, &mut gh, &config).await?
+        }
+        Commands::Sync(opts) => {
+            commands::sync::sync(opts, &git, &mut gh, &config).await?
         }
         // The following commands are executed above and return from this
         // function before it reaches this match.
