@@ -42,6 +42,42 @@ fn signer_ref(sign: &Option<git2_ext::ops::UserSign>) -> Option<&dyn Sign> {
     sign.as_ref().map(|s| s as &dyn Sign)
 }
 
+/// Build the committer signature following Git's own precedence, which
+/// libgit2's `Repository::signature` does not replicate: each of the name and
+/// email is resolved from `GIT_COMMITTER_NAME`/`GIT_COMMITTER_EMAIL`, then the
+/// `committer.*` config, and only then the default `user.*` signature. The
+/// timestamp is set to now (like `Repository::signature`).
+///
+/// libgit2's default signature reads `user.name`/`user.email` only, so a commit
+/// it stamps always lists the configured user as committer even when the
+/// environment asks for a different committer identity. Cloud Dev sets
+/// `GIT_COMMITTER_EMAIL` to a shared bot identity (keeping `user.email` as the
+/// author) so its host-side signing service will sign the commit; honoring that
+/// precedence here is what lets `spr diff` produce signable commits there.
+fn committer_signature(
+    repo: &git2::Repository,
+) -> Result<git2::Signature<'static>> {
+    let config = repo.config()?;
+    let default = repo.signature().ok();
+
+    let name = std::env::var("GIT_COMMITTER_NAME")
+        .ok()
+        .or_else(|| config.get_string("committer.name").ok())
+        .or_else(|| default.as_ref().and_then(|s| s.name().map(String::from)));
+    let email = std::env::var("GIT_COMMITTER_EMAIL")
+        .ok()
+        .or_else(|| config.get_string("committer.email").ok())
+        .or_else(|| default.as_ref().and_then(|s| s.email().map(String::from)));
+
+    match (name, email) {
+        (Some(name), Some(email)) => Ok(git2::Signature::now(&name, &email)?),
+        _ => Err(Error::new(
+            "Could not determine committer identity; set user.name and \
+             user.email (or GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL)",
+        )),
+    }
+}
+
 #[derive(Debug)]
 pub struct CommitOption {
     pub message: String,
@@ -477,13 +513,11 @@ impl Git {
         let message = git2::message_prettify(message, None)?;
         let sign = load_signer(&repo);
 
-        // The committer signature should be the default signature (i.e. the
-        // current user - as configured in Git as `user.name` and `user.email` -
-        // and the timestamp set to now). If the default signature can't be
-        // obtained (no user configured), then take the user/email from the
-        // existing commit but make a new signature which has a timestamp of
-        // now.
-        let committer = repo.signature().or_else(|_| {
+        // The committer signature follows Git's committer-identity precedence
+        // (see `committer_signature`), with the timestamp set to now. If no
+        // identity can be determined, fall back to the existing commit's
+        // committer with a fresh timestamp.
+        let committer = committer_signature(&repo).or_else(|_| {
             git2::Signature::now(
                 String::from_utf8_lossy(
                     original_commit.committer().name_bytes(),
