@@ -31,7 +31,7 @@ pub async fn merge(
         crate::git::PullRequestFilter::All,
     )?;
 
-    if prepared_commits.get(0).is_none() {
+    if prepared_commits.is_empty() {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;
         return result;
     };
@@ -70,7 +70,7 @@ pub async fn merge(
                 "✅",
                 &format!(
                     "Enabled auto-merge on Pull Request #{}: {}",
-                    pull_request_number, &pull_request_url,
+                    pull_request_number, pull_request_url,
                 ),
             )?;
         } else {

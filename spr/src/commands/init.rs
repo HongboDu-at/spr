@@ -31,7 +31,7 @@ pub async fn init() -> Result<()> {
     let github_auth_token = config
         .get_string("spr.githubAuthToken")
         .ok()
-        .and_then(|value| if value.is_empty() { None } else { Some(value) });
+        .filter(|value| !value.is_empty());
 
     output(
         "🔑",
@@ -126,7 +126,7 @@ pub async fn init() -> Result<()> {
     let github_repo = config
         .get_string("spr.githubRepository")
         .ok()
-        .and_then(|value| if value.is_empty() { None } else { Some(value) })
+        .filter(|value| !value.is_empty())
         .or_else(|| {
             url.as_ref()
                 .and_then(|url| regex.captures(url))
@@ -145,7 +145,7 @@ pub async fn init() -> Result<()> {
 
     let github_repo_info = octocrab
         .get::<octocrab::models::Repository, _, _>(
-            format!("repos/{}", &github_repo),
+            format!("repos/{}", github_repo),
             None::<&()>,
         )
         .await?;
@@ -166,8 +166,8 @@ pub async fn init() -> Result<()> {
     let branch_prefix = config
         .get_string("spr.branchPrefix")
         .ok()
-        .and_then(|value| if value.is_empty() { None } else { Some(value) })
-        .unwrap_or_else(|| format!("spr/{}/", &github_user.login));
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("spr/{}/", github_user.login));
 
     output(
         "❓",

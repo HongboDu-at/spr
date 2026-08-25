@@ -43,7 +43,7 @@ pub async fn sync(
         git.get_prepared_commits(config, Some(gh), pull_request_filter)?;
     let length = prepared_commits.len();
 
-    let master_base_oid = if let Some(first_commit) = prepared_commits.get(0) {
+    let master_base_oid = if let Some(first_commit) = prepared_commits.first() {
         first_commit.parent_oid
     } else {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;
