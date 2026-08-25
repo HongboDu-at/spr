@@ -14,6 +14,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # `gh` finds the repository from a checkout or from GH_REPO. The publish job
+  # has no checkout, so it needs this.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   create_release:
