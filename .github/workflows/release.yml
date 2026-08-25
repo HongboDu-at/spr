@@ -51,8 +51,6 @@ jobs:
           # ARM Linux is free on a public repository only.
           - os: ubuntu-24.04-arm
             name: linux-arm64
-          - os: macos-13
-            name: macos-x86_64
           - os: macos-latest
             name: macos-arm64
 

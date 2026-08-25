@@ -152,7 +152,7 @@ Homebrew, Nix and crates.io carry the original tool, not this fork.
 curl -fsSL https://raw.githubusercontent.com/HongboDu-at/spr/main/install.sh | sh
 ```
 
-Installs the latest release into `$HOME/.local/bin`. Set `SPR_VERSION` (e.g. `1.3.4-enhanced.1`) or `SPR_INSTALL_DIR` to override. Binaries are built for Linux and macOS on x86_64 and arm64, and can also be downloaded from the [releases page](https://github.com/HongboDu-at/spr/releases).
+Installs the latest release into `$HOME/.local/bin`. Set `SPR_VERSION` (e.g. `1.3.4-enhanced.1`) or `SPR_INSTALL_DIR` to override. Binaries are built for Linux on x86_64 and arm64, and macOS on arm64, and can also be downloaded from the [releases page](https://github.com/HongboDu-at/spr/releases).
 
 ### From source
 
