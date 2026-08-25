@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use crate::{error::Result, git::PreparedCommit, message::MessageSection};
+use crate::{error::Result, git::PreparedCommit};
 
 pub fn output(icon: &str, text: &str) -> Result<()> {
     let term = console::Term::stdout();
@@ -29,14 +29,7 @@ pub fn write_commit_title(prepared_commit: &PreparedCommit) -> Result<()> {
     term.write_line(&format!(
         "{} {}",
         console::style(&prepared_commit.short_id).italic(),
-        console::style(
-            prepared_commit
-                .message
-                .get(&MessageSection::Title)
-                .map(|s| &s[..])
-                .unwrap_or("(untitled)"),
-        )
-        .yellow()
+        console::style(prepared_commit.title()).yellow()
     ))?;
     Ok(())
 }

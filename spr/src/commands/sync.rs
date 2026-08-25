@@ -7,20 +7,17 @@
 
 use crate::{
     error::{Error, Result, ResultExt},
-    git::{CommitOption, Git, PreparedCommit},
+    git::{Git, PreparedCommit},
     github::{PullRequest, PullRequestState},
-    message::{build_commit_message, MessageSection},
+    message::build_commit_message,
     output::{output, write_commit_title},
 };
 use git2::Oid;
-use inquire::MultiSelect;
 
 #[derive(Debug, clap::Parser)]
 pub struct SyncOptions {
-    /// Open an interactive selection to select all or some commits to
-    /// sync, not just the HEAD commit
-    #[clap(long, short = 'a')]
-    all: bool,
+    #[clap(flatten)]
+    selection: crate::commands::select::CommitSelection,
 
     /// Show what would change without modifying the local stack
     #[clap(long)]
@@ -39,7 +36,11 @@ pub async fn sync(
     // (spawned below) don't race on updating this shared ref.
     Git::fetch_from_remote(&[&config.master_ref], &config.remote_name).await?;
 
-    let mut prepared_commits = git.get_prepared_commits(config, Some(gh))?;
+    // Only fetch the Pull Requests that this run can look at: each one costs
+    // a query and a `git fetch`.
+    let pull_request_filter = opts.selection.pull_request_filter(git)?;
+    let mut prepared_commits =
+        git.get_prepared_commits(config, Some(gh), pull_request_filter)?;
     let length = prepared_commits.len();
 
     let master_base_oid = if let Some(first_commit) = prepared_commits.get(0) {
@@ -51,38 +52,12 @@ pub async fn sync(
 
     // Select which commits to consider BEFORE fetching PR info, so the
     // interactive prompt appears immediately.
-    let selected_indexes: Vec<usize> = if opts.all {
-        let options = prepared_commits
-            .iter()
-            .enumerate()
-            .map(|(i, commit)| {
-                let title = commit
-                    .message
-                    .get(&MessageSection::Title)
-                    .map(|t| &t[..])
-                    .unwrap_or("(untitled)");
-                CommitOption {
-                    message: format!(
-                        "PR #{} - {}",
-                        commit
-                            .pull_request_number
-                            .map(|n| n.to_string())
-                            .unwrap_or_else(|| "??????".to_string()),
-                        title,
-                    ),
-                    index: i as isize,
-                }
-            })
-            .rev()
-            .collect::<Vec<CommitOption>>();
-
-        let ans =
-            MultiSelect::new("Select commits to sync:", options).prompt()?;
-
-        ans.iter().map(|x| x.index as usize).rev().collect()
-    } else {
-        vec![length - 1]
-    };
+    let selected_indexes = opts.selection.resolve(
+        git,
+        config,
+        &prepared_commits,
+        "Select commits to sync:",
+    )?;
 
     // Await PR tasks only for selected commits
     let mut pull_requests: Vec<Option<PullRequest>> = vec![None; length];
@@ -155,11 +130,7 @@ pub async fn sync(
                 return Err(Error::new(format!(
                     "Conflict while syncing PR #{} '{}'",
                     pr.number,
-                    commit
-                        .message
-                        .get(&MessageSection::Title)
-                        .map(|s| &s[..])
-                        .unwrap_or("(untitled)"),
+                    commit.title(),
                 )));
             }
             let tree_oid = git.write_index(index)?;
@@ -177,11 +148,7 @@ pub async fn sync(
             if index.has_conflicts() {
                 return Err(Error::new(format!(
                     "Conflict while replaying commit '{}' after sync",
-                    commit
-                        .message
-                        .get(&MessageSection::Title)
-                        .map(|s| &s[..])
-                        .unwrap_or("(untitled)"),
+                    commit.title(),
                 )));
             }
             let tree_oid = git.write_index(index)?;

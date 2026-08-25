@@ -32,7 +32,11 @@ pub async fn close(
 ) -> Result<()> {
     let mut result = Ok(());
 
-    let mut prepared_commits = git.get_prepared_commits(config, None)?;
+    let mut prepared_commits = git.get_prepared_commits(
+        config,
+        None,
+        crate::git::PullRequestFilter::All,
+    )?;
 
     if prepared_commits.is_empty() {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;

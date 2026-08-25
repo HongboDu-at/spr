@@ -100,6 +100,31 @@ pub struct PreparedCommit {
     pub pull_request_task: Option<JoinHandle<Result<PullRequest>>>,
 }
 
+/// Which commits spr fetches the Pull Request of. A Pull Request costs a
+/// GraphQL query and a `git fetch`, so a run must not pay for the commits that
+/// it does not look at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestFilter {
+    /// Every commit. The interactive selection can choose any of them.
+    All,
+
+    /// The HEAD commit only.
+    Head,
+
+    /// One named commit only.
+    Commit(Oid),
+}
+
+impl PreparedCommit {
+    /// The title of the commit, or a placeholder if it has none.
+    pub fn title(&self) -> &str {
+        self.message
+            .get(&MessageSection::Title)
+            .map(|title| &title[..])
+            .unwrap_or("(untitled)")
+    }
+}
+
 #[derive(Clone)]
 pub struct Git {
     repo: std::sync::Arc<std::sync::Mutex<git2::Repository>>,
@@ -130,10 +155,21 @@ impl Git {
         &self,
         config: &Config,
         gh: Option<&crate::github::GitHub>,
+        filter: PullRequestFilter,
     ) -> Result<Vec<PreparedCommit>> {
-        self.get_commit_oids(config.master_ref.local())?
-            .into_iter()
-            .map(|oid| self.prepare_commit(config, oid, gh))
+        let oids = self.get_commit_oids(config.master_ref.local())?;
+        let head = oids.last().copied();
+
+        oids.iter()
+            .map(|&oid| {
+                let wanted = match filter {
+                    PullRequestFilter::All => true,
+                    PullRequestFilter::Head => Some(oid) == head,
+                    PullRequestFilter::Commit(commit) => oid == commit,
+                };
+
+                self.prepare_commit(config, oid, if wanted { gh } else { None })
+            })
             .collect()
     }
 
@@ -279,6 +315,21 @@ impl Git {
             .resolve()?
             .target()
             .ok_or_else(|| Error::new("Cannot resolve HEAD"))?;
+
+        Ok(oid)
+    }
+
+    /// Resolve a revision that the user typed - a commit id, a short commit
+    /// id, or a name such as `HEAD~2` - into the id of a commit.
+    pub fn resolve_commit(&self, revision: &str) -> Result<Oid> {
+        let repo = self.repo();
+        let object = repo
+            .revparse_single(revision)
+            .reword(format!("Could not find commit '{revision}'"))?;
+        let oid = object
+            .peel_to_commit()
+            .reword(format!("'{revision}' does not name a commit"))?
+            .id();
 
         Ok(oid)
     }

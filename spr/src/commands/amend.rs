@@ -25,7 +25,11 @@ pub async fn amend(
     gh: &mut crate::github::GitHub,
     config: &crate::config::Config,
 ) -> Result<()> {
-    let mut pc = git.get_prepared_commits(config, None)?;
+    let mut pc = git.get_prepared_commits(
+        config,
+        None,
+        crate::git::PullRequestFilter::All,
+    )?;
 
     let len = pc.len();
     if len == 0 {

@@ -7,19 +7,14 @@
 
 use crate::{
     error::{Error, Result, ResultExt},
-    git::CommitOption,
-    message::MessageSection,
     output::output,
     utils::run_command,
 };
-use inquire::MultiSelect;
 
 #[derive(Debug, clap::Parser)]
 pub struct MergeOptions {
-    /// Open an interactive selection to select all or some commits to
-    /// merge pull requests, not just the HEAD commit
-    #[clap(long, short = 'a')]
-    all: bool,
+    #[clap(flatten)]
+    selection: crate::commands::select::CommitSelection,
 }
 
 pub async fn merge(
@@ -30,46 +25,23 @@ pub async fn merge(
     let mut result = Ok(());
 
     // Look up the commits on the local branch
-    let prepared_commits = git.get_prepared_commits(config, None)?;
-    let length = prepared_commits.len();
+    let prepared_commits = git.get_prepared_commits(
+        config,
+        None,
+        crate::git::PullRequestFilter::All,
+    )?;
 
     if prepared_commits.get(0).is_none() {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;
         return result;
     };
 
-    let selected_indexes = if opts.all {
-        let options = prepared_commits
-            .iter()
-            .enumerate()
-            .map(|(i, commit)| {
-                let title = commit
-                    .message
-                    .get(&MessageSection::Title)
-                    .map(|t| &t[..])
-                    .unwrap_or("(untitled)");
-                CommitOption {
-                    message: format!(
-                        "PR #{} - {}",
-                        commit
-                            .pull_request_number
-                            .map(|n| n.to_string())
-                            .unwrap_or_else(|| "??????".to_string()),
-                        title
-                    ),
-                    index: i as isize,
-                }
-            })
-            .rev()
-            .collect::<Vec<CommitOption>>();
-
-        let ans =
-            MultiSelect::new("Select commits to merge:", options).prompt()?;
-
-        ans.iter().map(|x| x.index as usize).rev().collect()
-    } else {
-        vec![length - 1]
-    };
+    let selected_indexes = opts.selection.resolve(
+        git,
+        config,
+        &prepared_commits,
+        "Select commits to merge:",
+    )?;
 
     // selected_indexes is sorted from lower commits to higher commits
     for index in selected_indexes {

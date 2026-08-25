@@ -18,7 +18,7 @@ use crate::{
 };
 use git2::Oid;
 use indoc::formatdoc;
-use inquire::{MultiSelect, Select};
+use inquire::Select;
 /// A Pull Request that this run of `spr diff` created or updated, together
 /// with the Pull Request its branch is based on. `base_pull_request_number` is
 /// `None` when the Pull Request is based on the master branch, which means it
@@ -38,10 +38,8 @@ const UNKNOWN_PR_SPECIAL_COMMIT_INDEX: isize = -2;
 
 #[derive(Debug, clap::Parser)]
 pub struct DiffOptions {
-    /// Open an interactive selection to select all or some commits to
-    /// create/update pull requests, not just the HEAD commit
-    #[clap(long, short = 'a')]
-    all: bool,
+    #[clap(flatten)]
+    selection: crate::commands::select::CommitSelection,
 
     /// Update the pull request title and description on GitHub from the local
     /// commit message
@@ -96,9 +94,11 @@ pub async fn diff(
     // (spawned below) don't race on updating this shared ref.
     Git::fetch_from_remote(&[&config.master_ref], &config.remote_name).await?;
 
-    // Look up the commits on the local branch
-    let mut prepared_commits = git.get_prepared_commits(config, Some(gh))?;
-    let length = prepared_commits.len();
+    // Look up the commits on the local branch. Only fetch the Pull Requests
+    // that this run can look at: each one costs a query and a `git fetch`.
+    let pull_request_filter = opts.selection.pull_request_filter(git)?;
+    let mut prepared_commits =
+        git.get_prepared_commits(config, Some(gh), pull_request_filter)?;
 
     // The parent of the first commit in the list is the commit on master that
     // the local branch is based on
@@ -111,39 +111,12 @@ pub async fn diff(
 
     let mut message_on_prompt = "".to_string();
 
-    let selected_indexes = if opts.all {
-        let options = prepared_commits
-            .iter()
-            .enumerate()
-            .map(|(i, commit)| {
-                let title = commit
-                    .message
-                    .get(&MessageSection::Title)
-                    .map(|t| &t[..])
-                    .unwrap_or("(untitled)");
-                CommitOption {
-                    message: format!(
-                        "PR #{} - {}",
-                        commit
-                            .pull_request_number
-                            .map(|n| n.to_string())
-                            .unwrap_or_else(|| "??????".to_string()),
-                        title
-                    ),
-                    index: i as isize,
-                }
-            })
-            .rev()
-            .collect::<Vec<CommitOption>>();
-
-        let ans =
-            MultiSelect::new("Select commits to create/update PR:", options)
-                .prompt()?;
-
-        ans.iter().map(|x| x.index as usize).rev().collect()
-    } else {
-        vec![length - 1]
-    };
+    let selected_indexes = opts.selection.resolve(
+        git,
+        config,
+        &prepared_commits,
+        "Select commits to create/update PR:",
+    )?;
 
     // Pull Requests created or updated below, ordered from the bottom commit
     // to the top one, so that we can tell GitHub about the stack they form.
@@ -233,9 +206,12 @@ async fn diff_impl(
             } else if base_index >= index as isize {
                 return Err(Error::new("Invalid base".to_string()));
             } else {
-                let pull_request =
-                    get_pull_request_for_index(prepared_commits, base_index)
-                        .await?;
+                let pull_request = get_pull_request_for_index(
+                    gh,
+                    prepared_commits,
+                    base_index,
+                )
+                .await?;
                 (pull_request.head, Some(pull_request.number))
             }
         }
@@ -297,6 +273,7 @@ async fn diff_impl(
                 }
                 choice_index => {
                     let pull_request = get_pull_request_for_index(
+                        gh,
                         prepared_commits,
                         choice_index,
                     )
@@ -879,26 +856,27 @@ async fn diff_impl(
 }
 
 async fn get_pull_request_for_index(
+    gh: &crate::github::GitHub,
     prepared_commits: &mut [PreparedCommit],
     choice_index: isize,
 ) -> Result<crate::github::PullRequest> {
-    let pull_request = if let Some(task) = &mut prepared_commits
+    let missing = || Error::new("Could not find a PR for the base".to_string());
+
+    let commit = prepared_commits
         .get_mut(choice_index as usize)
-        .unwrap()
-        .pull_request_task
-    {
-        Some(task.await??)
-    } else {
-        None
-    };
-    Ok(match pull_request {
-        Some(pull_request) => pull_request,
-        None => {
-            return Err(Error::new(
-                "Could not find a PR for the base".to_string(),
-            ));
-        }
-    })
+        .ok_or_else(missing)?;
+
+    // spr fetches a Pull Request in the background only for the commits that
+    // the run knew about in advance. This commit is a base that the user chose
+    // later, so fetch it now if that did not happen.
+    if let Some(task) = &mut commit.pull_request_task {
+        return task.await?;
+    }
+
+    match commit.pull_request_number {
+        Some(number) => gh.clone().get_pull_request(number).await,
+        None => Err(missing()),
+    }
 }
 
 fn parse_parent_or_zero(s: &str) -> isize {
