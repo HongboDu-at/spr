@@ -49,10 +49,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Build on the oldest Ubuntu that GitHub still offers. A binary that
+          # links glibc runs on that version and newer, never on older, so the
+          # build machine sets the floor for everyone. 22.04 carries glibc
+          # 2.35; 24.04 carries 2.39 and locks out every older system.
+          - os: ubuntu-22.04
             name: linux-x86_64
           # ARM Linux is free on a public repository only.
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             name: linux-arm64
           - os: macos-latest
             name: macos-arm64
