@@ -1,0 +1,27 @@
+on: push
+name: Test and lint
+
+# Make sure CI fails on all warnings, including Clippy lints
+env:
+  RUSTFLAGS: "-Dwarnings"
+
+# spr is a tool for amending and force-pushing, so a branch is pushed many
+# times in a row. Only the newest push of a ref is worth a run.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clippy_check:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo clippy --all-targets --all-features
+
+  tests:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo test
