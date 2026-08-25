@@ -24,6 +24,35 @@ pub struct GitHub {
     graphql_client: reqwest::Client,
 }
 
+/// One Pull Request as it appears inside a stack object.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StackPullRequest {
+    pub number: u64,
+}
+
+/// A stack of Pull Requests, as returned by GitHub's Stacks REST API.
+/// `number` is the stack number that GitHub shows in the user interface and
+/// that is used to address the stack in API paths.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Stack {
+    pub number: u64,
+    #[serde(default)]
+    pub pull_requests: Vec<StackPullRequest>,
+}
+
+impl Stack {
+    /// The Pull Request numbers in the stack, ordered from the bottom of the
+    /// stack to the top.
+    pub fn pull_request_numbers(&self) -> Vec<u64> {
+        self.pull_requests.iter().map(|pr| pr.number).collect()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct StackRequest<'a> {
+    pull_requests: &'a [u64],
+}
+
 #[derive(Debug, Clone)]
 pub struct PullRequest {
     pub number: u64,
@@ -361,6 +390,116 @@ impl GitHub {
                 Some(&updates),
             )
             .await?;
+
+        Ok(())
+    }
+
+    /// Find the stack that contains the given Pull Request. Returns `None` if
+    /// the Pull Request is not part of a stack.
+    pub async fn find_stack_for_pull_request(
+        &self,
+        number: u64,
+    ) -> Result<Option<Stack>> {
+        let stacks: Vec<Stack> = octocrab::instance()
+            .get(
+                format!(
+                    "repos/{}/{}/stacks?pull_request={}",
+                    self.config.owner, self.config.repo, number
+                ),
+                None::<&()>,
+            )
+            .await?;
+
+        Ok(stacks.into_iter().next())
+    }
+
+    /// Create a stack from an ordered list of Pull Request numbers, from the
+    /// bottom of the stack to the top. GitHub requires at least two Pull
+    /// Requests, and the base branch of each one must be the branch of the
+    /// Pull Request below it.
+    pub async fn create_stack(&self, pull_requests: &[u64]) -> Result<Stack> {
+        Ok(octocrab::instance()
+            .post(
+                format!(
+                    "repos/{}/{}/stacks",
+                    self.config.owner, self.config.repo
+                ),
+                Some(&StackRequest { pull_requests }),
+            )
+            .await?)
+    }
+
+    /// Append Pull Requests to the top of an existing stack. GitHub's add
+    /// endpoint can only append: it cannot change the order of a stack and it
+    /// cannot remove a Pull Request from one.
+    pub async fn add_to_stack(
+        &self,
+        stack_number: u64,
+        pull_requests: &[u64],
+    ) -> Result<()> {
+        let _: Stack = octocrab::instance()
+            .post(
+                format!(
+                    "repos/{}/{}/stacks/{}/add",
+                    self.config.owner, self.config.repo, stack_number
+                ),
+                Some(&StackRequest { pull_requests }),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Read only the base branch of a Pull Request. This is much cheaper than
+    /// `get_pull_request`, which also runs a GraphQL query and fetches the
+    /// branches of the Pull Request from the remote.
+    pub async fn get_pull_request_base(
+        &self,
+        number: u64,
+    ) -> Result<GitHubBranch> {
+        #[derive(Deserialize)]
+        struct Base {
+            #[serde(rename = "ref")]
+            branch_name: String,
+        }
+
+        #[derive(Deserialize)]
+        struct PullRequestBase {
+            base: Base,
+        }
+
+        let pull_request: PullRequestBase = octocrab::instance()
+            .get(
+                format!(
+                    "repos/{}/{}/pulls/{}",
+                    self.config.owner, self.config.repo, number
+                ),
+                None::<&()>,
+            )
+            .await?;
+
+        Ok(self
+            .config
+            .new_github_branch(&pull_request.base.branch_name))
+    }
+
+    /// Remove the Pull Requests from a stack, so that a stack with a
+    /// different order can be created. This does not change the Pull Requests
+    /// themselves. GitHub does not remove a Pull Request that is in a merge
+    /// queue or that has auto-merge switched on, so the stack may survive.
+    pub async fn unstack(&self, stack_number: u64) -> Result<()> {
+        let octocrab = octocrab::instance();
+
+        let url = octocrab.absolute_url(format!(
+            "repos/{}/{}/stacks/{}/unstack",
+            self.config.owner, self.config.repo, stack_number
+        ))?;
+
+        // We cannot use `post` here. GitHub answers with status 204 and an
+        // empty body when the stack is gone, and an empty body is not valid
+        // JSON.
+        let response = octocrab._post(url, None::<&()>).await?;
+        octocrab::map_github_error(response).await?;
 
         Ok(())
     }

@@ -19,6 +19,19 @@ use crate::{
 use git2::Oid;
 use indoc::formatdoc;
 use inquire::{MultiSelect, Select};
+/// A Pull Request that this run of `spr diff` created or updated, together
+/// with the Pull Request its branch is based on. `base_pull_request_number` is
+/// `None` when the Pull Request is based on the master branch, which means it
+/// is the bottom of a stack (or not part of one at all).
+///
+/// `head_branch_name` lets a later commit in the same run recognise this Pull
+/// Request as its base without asking GitHub.
+#[derive(Debug, Clone)]
+struct StackLink {
+    pull_request_number: u64,
+    head_branch_name: String,
+    base_pull_request_number: Option<u64>,
+}
 
 const MAIN_SPECIAL_COMMIT_INDEX: isize = -1;
 const UNKNOWN_PR_SPECIAL_COMMIT_INDEX: isize = -2;
@@ -132,6 +145,10 @@ pub async fn diff(
         vec![length - 1]
     };
 
+    // Pull Requests created or updated below, ordered from the bottom commit
+    // to the top one, so that we can tell GitHub about the stack they form.
+    let mut stack_links: Vec<StackLink> = Vec::new();
+
     // selected_indexes is sorted from lower commits to higher commits
     for &index in &selected_indexes {
         if result.is_err() {
@@ -142,7 +159,7 @@ pub async fn diff(
         // This makes it easier to run the code to update the local commit message
         // with all the changes that the implementation makes at the end, even if
         // the implementation encounters an error or exits early.
-        result = diff_impl(
+        match diff_impl(
             &opts,
             &mut message_on_prompt,
             git,
@@ -152,8 +169,13 @@ pub async fn diff(
             master_base_oid,
             index,
             &selected_indexes,
+            &stack_links,
         )
-        .await;
+        .await
+        {
+            Ok(stack_link) => stack_links.extend(stack_link),
+            Err(error) => result = Err(error),
+        }
     }
 
     // This updates the commit message in the local Git repository (if it was
@@ -162,6 +184,12 @@ pub async fn diff(
         &mut result,
         git.rewrite_commit_messages(prepared_commits.as_mut_slice(), None),
     );
+
+    // Now that all Pull Requests exist and have the right base branches, tell
+    // GitHub about the stack they form.
+    if result.is_ok() {
+        update_github_stack(gh, &stack_links).await;
+    }
 
     result
 }
@@ -177,7 +205,8 @@ async fn diff_impl(
     master_base_oid: Oid,
     index: usize,
     selected_indexes: &[usize],
-) -> Result<()> {
+    stack_links: &[StackLink],
+) -> Result<Option<StackLink>> {
     write_commit_title(prepared_commits.get_mut(index).unwrap())?;
 
     let pull_request = if let Some(task) =
@@ -211,7 +240,14 @@ async fn diff_impl(
             }
         }
     } else if let Some(pull_request) = &pull_request {
-        (pull_request.base.clone(), None)
+        // The Pull Request exists already, so GitHub knows its base branch and
+        // we do not have to ask the user again. If that base is the branch of
+        // another Pull Request, then this commit is part of a stack and we
+        // need that Pull Request's number.
+        let base_pull_request_number =
+            base_pull_request_number(gh, &pull_request.base, stack_links).await;
+
+        (pull_request.base.clone(), base_pull_request_number)
     } else if index == 0 {
         (config.master_ref.clone(), None)
     } else {
@@ -494,7 +530,11 @@ async fn diff_impl(
                 }
             }
 
-            return Ok(());
+            return Ok(Some(StackLink {
+                pull_request_number: pull_request.number,
+                head_branch_name: pull_request.head.branch_name().to_string(),
+                base_pull_request_number,
+            }));
         }
     }
 
@@ -661,6 +701,13 @@ async fn diff_impl(
         &pr_commit_parents[..],
     )?;
 
+    // The Pull Request is part of a native GitHub stack only if its base is
+    // the branch of the Pull Request below it. That is not the case when we
+    // put an intermediate base branch in between, which happens with
+    // --no-cherry-pick.
+    let stack_base_pull_request_number =
+        base_pull_request_number.filter(|_| base_branch.is_none());
+
     let mut cmd = tokio::process::Command::new("git");
     cmd.arg("push").arg("--atomic");
 
@@ -673,6 +720,9 @@ async fn diff_impl(
         pr_commit,
         pull_request_branch.on_github()
     ));
+
+    // Set on both paths below, and returned at the end.
+    let stack_link;
 
     if let Some(pull_request) = pull_request {
         // We are updating an existing Pull Request
@@ -746,6 +796,12 @@ async fn diff_impl(
             gh.update_pull_request(pull_request.number, pull_request_updates)
                 .await?;
         }
+
+        stack_link = Some(StackLink {
+            pull_request_number: pull_request.number,
+            head_branch_name: pull_request_branch.branch_name().to_string(),
+            base_pull_request_number: stack_base_pull_request_number,
+        });
     } else {
         // We are creating a new Pull Request.
 
@@ -790,6 +846,12 @@ async fn diff_impl(
 
         message.insert(MessageSection::PullRequest, pull_request_url);
 
+        stack_link = Some(StackLink {
+            pull_request_number,
+            head_branch_name: pull_request_branch.branch_name().to_string(),
+            base_pull_request_number: stack_base_pull_request_number,
+        });
+
         // If current commit is not the last selected commit, update pull request number and task
         // so that it can be used as a base PR for the subsequent commits.
         if Some(&index) != selected_indexes.last() {
@@ -813,7 +875,7 @@ async fn diff_impl(
         }
     }
 
-    Ok(())
+    Ok(stack_link)
 }
 
 async fn get_pull_request_for_index(
@@ -851,4 +913,246 @@ fn parse_parent_or_zero(s: &str) -> isize {
     } else {
         0
     }
+}
+
+/// Find the number of the Pull Request whose branch is `base`, which is the
+/// Pull Request below this one in a stack. Returns `None` when `base` is the
+/// master branch, or an intermediate base branch, or any other branch that
+/// does not belong to an open Pull Request.
+///
+/// `known` holds the Pull Requests that this run has handled already, so that
+/// a stack submitted in one go needs no call to GitHub at all.
+async fn base_pull_request_number(
+    gh: &crate::github::GitHub,
+    base: &crate::github::GitHubBranch,
+    known: &[StackLink],
+) -> Option<u64> {
+    if base.is_master_branch() {
+        return None;
+    }
+
+    if let Some(link) = known
+        .iter()
+        .find(|link| link.head_branch_name == base.branch_name())
+    {
+        return Some(link.pull_request_number);
+    }
+
+    gh.get_open_pull_request_number_for_head(base.branch_name().to_string())
+        .await
+        .ok()
+}
+
+const STACKS_NOT_ENABLED: &str =
+    "This repository does not have stacked pull requests enabled";
+
+/// GitHub answers "not found" on the stack endpoints when the repository does
+/// not have stacked pull requests. We can only recognise this from the text of
+/// the message, because our error type does not keep the status code.
+fn is_not_found(error: &Error) -> bool {
+    error
+        .messages()
+        .iter()
+        .any(|message| message.to_lowercase().contains("not found"))
+}
+
+/// Tell GitHub about the stack that the Pull Requests of this run form, so
+/// that GitHub shows them as a native stack.
+///
+/// This is best effort. The Pull Requests themselves are already created and
+/// up to date at this point, so a problem here must never fail the command. We
+/// report it and carry on.
+async fn update_github_stack(
+    gh: &crate::github::GitHub,
+    stack_links: &[StackLink],
+) {
+    if let Err(error) = update_github_stack_impl(gh, stack_links).await {
+        let _ = output("⚠️", "Could not update the stack on GitHub");
+        for message in error.messages() {
+            let _ = output("  ", message);
+        }
+    }
+}
+
+async fn update_github_stack_impl(
+    gh: &crate::github::GitHub,
+    stack_links: &[StackLink],
+) -> Result<()> {
+    let chain = build_stack_chain(gh, stack_links).await?;
+
+    // GitHub needs at least two Pull Requests to form a stack. Anything
+    // shorter means these commits go straight onto the master branch, which is
+    // not a stack.
+    if chain.len() < 2 {
+        return Ok(());
+    }
+
+    let stack = match gh.find_stack_for_pull_request(chain[0]).await {
+        Ok(stack) => stack,
+        // There is no point in trying to create a stack in a repository that
+        // does not have them.
+        Err(error) if is_not_found(&error) => {
+            return output("⚠️", STACKS_NOT_ENABLED);
+        }
+        // Any other problem: carry on to the create path, which reports its
+        // own errors.
+        Err(_) => None,
+    };
+
+    let Some(stack) = stack else {
+        return create_github_stack(gh, &chain).await;
+    };
+
+    let current = stack.pull_request_numbers();
+
+    if current == chain {
+        return Ok(());
+    }
+
+    // GitHub's add endpoint can only append to the top of a stack. So we can
+    // only add if what we have is what GitHub has, plus some new Pull Requests
+    // on top.
+    if chain.len() > current.len() && chain[..current.len()] == current[..] {
+        gh.add_to_stack(stack.number, &chain[current.len()..])
+            .await?;
+
+        return output(
+            "🥞",
+            &format!(
+                "Added {} pull request(s) to stack #{} on GitHub",
+                chain.len() - current.len(),
+                stack.number
+            ),
+        );
+    }
+
+    // The order changed, and GitHub has no endpoint for that. So we remove the
+    // stack and make a new one. We only do this when the stack holds exactly
+    // the Pull Requests that we have, so that we never drop a Pull Request
+    // that somebody added to the stack somewhere else. Pull Request numbers
+    // are unique, so equal length plus containment means equal sets.
+    if chain.len() == current.len()
+        && chain.iter().all(|number| current.contains(number))
+    {
+        output(
+            "🥞",
+            &format!(
+                "The order of stack #{} changed - building it again on GitHub",
+                stack.number
+            ),
+        )?;
+
+        gh.unstack(stack.number).await?;
+
+        return create_github_stack(gh, &chain).await;
+    }
+
+    output(
+        "⚠️",
+        &format!(
+            "Stack #{} on GitHub does not match your commits and was not \
+             updated. Your pull requests are up to date.",
+            stack.number
+        ),
+    )
+}
+
+async fn create_github_stack(
+    gh: &crate::github::GitHub,
+    chain: &[u64],
+) -> Result<()> {
+    let error = match gh.create_stack(chain).await {
+        Ok(stack) => {
+            return output(
+                "🥞",
+                &format!(
+                    "Created stack #{} on GitHub with {} pull requests",
+                    stack.number,
+                    chain.len()
+                ),
+            )
+        }
+        Err(error) => error,
+    };
+
+    // GitHub rejects a stack for a handful of reasons that are not faults of
+    // ours. Recognise those and explain them, rather than show the raw error.
+    let message = error.messages().join(" ");
+    let lowercase_message = message.to_lowercase();
+
+    let explanation = if lowercase_message.contains("already stacked")
+        || lowercase_message.contains("already part of a stack")
+    {
+        // GitHub names the Pull Requests it rejected. If that list covers all
+        // of ours, they are already stacked together and there is nothing to
+        // do.
+        if chain
+            .iter()
+            .all(|number| message.contains(&format!("#{}", number)))
+        {
+            return Ok(());
+        }
+
+        "Some of your pull requests are already part of a different stack on \
+         GitHub"
+    } else if lowercase_message.contains("must form a stack") {
+        // This happens when a Pull Request in the middle of the stack has been
+        // merged and GitHub has deleted its branch, which breaks the chain of
+        // base branches.
+        "GitHub did not accept the stack, because the base branch of each pull \
+         request must be the branch of the pull request below it"
+    } else if is_not_found(&error) {
+        STACKS_NOT_ENABLED
+    } else {
+        return Err(error);
+    };
+
+    output("⚠️", explanation)
+}
+
+/// Walk from the top-most Pull Request of this run down to the bottom of the
+/// stack, and return the Pull Request numbers ordered from the bottom to the
+/// top. GitHub wants the whole stack, but the user may have submitted only
+/// some of the commits, so Pull Requests that this run did not touch are
+/// looked up on GitHub.
+async fn build_stack_chain(
+    gh: &crate::github::GitHub,
+    stack_links: &[StackLink],
+) -> Result<Vec<u64>> {
+    let top = match stack_links.last() {
+        Some(top) => top,
+        None => return Ok(Vec::new()),
+    };
+
+    // Collected from the top down, and turned around at the end.
+    let mut chain = vec![top.pull_request_number];
+    let mut base = top.base_pull_request_number;
+
+    while let Some(number) = base {
+        // Guard against a cycle in the base branches, which would otherwise
+        // keep us here forever.
+        if chain.contains(&number) {
+            break;
+        }
+
+        chain.push(number);
+
+        base = match stack_links
+            .iter()
+            .find(|link| link.pull_request_number == number)
+        {
+            // We submitted this Pull Request in this run, so we know its base
+            // already and do not have to ask GitHub.
+            Some(link) => link.base_pull_request_number,
+            None => {
+                let base_branch = gh.get_pull_request_base(number).await?;
+
+                base_pull_request_number(gh, &base_branch, stack_links).await
+            }
+        };
+    }
+
+    chain.reverse();
+
+    Ok(chain)
 }
