@@ -881,10 +881,13 @@ async fn get_pull_request_for_index(
     }
 }
 
+/// How many commits below this one the base is, for the value of `--base`.
+/// `HEAD^` and `HEAD~` mean one commit below, and `HEAD^2` and `HEAD~2` mean
+/// two. Anything else is the name of a branch, and gives 0.
 fn parse_parent_or_zero(s: &str) -> isize {
     if s == "HEAD~" || s == "HEAD^" {
         1
-    } else if s.starts_with("HEAD^") || s.starts_with("HEAD^") {
+    } else if s.starts_with("HEAD^") || s.starts_with("HEAD~") {
         s[5..].parse::<isize>().unwrap_or_default()
     } else {
         0
@@ -1131,4 +1134,27 @@ async fn build_stack_chain(
     chain.reverse();
 
     Ok(chain)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_parent_or_zero;
+
+    #[test]
+    fn test_parse_parent_or_zero() {
+        assert_eq!(parse_parent_or_zero("HEAD^"), 1);
+        assert_eq!(parse_parent_or_zero("HEAD~"), 1);
+        assert_eq!(parse_parent_or_zero("HEAD^1"), 1);
+        assert_eq!(parse_parent_or_zero("HEAD~1"), 1);
+        assert_eq!(parse_parent_or_zero("HEAD^2"), 2);
+        assert_eq!(parse_parent_or_zero("HEAD~2"), 2);
+        assert_eq!(parse_parent_or_zero("HEAD~10"), 10);
+    }
+
+    #[test]
+    fn test_parse_parent_or_zero_with_a_branch_name() {
+        assert_eq!(parse_parent_or_zero("main"), 0);
+        assert_eq!(parse_parent_or_zero("HEAD"), 0);
+        assert_eq!(parse_parent_or_zero("HEAD~x"), 0);
+    }
 }
