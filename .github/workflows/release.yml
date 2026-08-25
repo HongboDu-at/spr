@@ -3,50 +3,89 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      # Fork releases only. Upstream tags look like `v1.3.7`, and this fork has
+      # all of them from spacedentist/spr. The `-enhanced.` part of the version
+      # keeps this pattern from matching any of them.
+      - "v*-enhanced.*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  macos:
-    name: Build for MacOS
-    runs-on: macos-10.15
-    env:
-      CARGO_TERM_COLOR: always
+  create_release:
+    name: Create the draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the tag against Cargo.toml
+        run: |
+          version="$(grep -m1 '^version = ' spr/Cargo.toml | cut -d'"' -f2)"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match version $version in spr/Cargo.toml"
+            exit 1
+          fi
+
+      - name: Create the release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --draft \
+            --prerelease="${{ contains(github.ref_name, '-rc') }}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: create_release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+          # ARM Linux is free on a public repository only.
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+          - os: macos-13
+            name: macos-x86_64
+          - os: macos-latest
+            name: macos-arm64
 
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Get version
-        id: get_version
-        run: echo ::set-output name=version::${GITHUB_REF/refs\/tags\/v/}
+      - uses: actions/checkout@v5
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          components: clippy
+        run: rustup toolchain install stable --profile minimal --no-self-update
 
+      # Test in the release profile, so that the build below reuses everything
+      # instead of compiling all the dependencies a second time.
       - name: Run tests
-        run: cargo test
+        run: cargo test --release --locked
 
-      - name: Build Release Mac
+      - name: Build
         run: |
-          cargo build --release
+          cargo build --release --locked
           strip target/release/spr
-          tar vczC target/release/ spr >spr-${{ steps.get_version.outputs.version }}-macos.tar.gz
-          ls -lh spr-*.tar.gz
 
-      - name: Extract release notes
-        id: release_notes
-        uses: ffurrer2/extract-release-notes@v1
+      # The name holds no version, so that the installer can use the address
+      # `releases/latest/download/<name>` and needs no call to the API.
+      - name: Make the archive and its checksum
+        run: |
+          tar czf "spr-${{ matrix.name }}.tar.gz" -C target/release spr
+          shasum -a 256 "spr-${{ matrix.name }}.tar.gz" >"spr-${{ matrix.name }}.tar.gz.sha256"
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          body: ${{ steps.release_notes.outputs.release_notes }}
-          prerelease: ${{ contains(github.ref, '-') }}
-          files: |
-            ./spr-*.tar.gz
+      - name: Upload the archive
+        run: gh release upload "$GITHUB_REF_NAME" ./spr-*.tar.gz ./spr-*.tar.gz.sha256
 
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  publish_release:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take the release out of draft
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

@@ -1,11 +1,17 @@
 [package]
 name = "spr"
-version = "1.3.5-enhanced-6.9.2026"
+# Upstream v1.3.4 plus 17 commits (fork point d472863), plus the changes in
+# this fork. The `-enhanced.N` part marks the fork, so this can never be
+# confused with an upstream release, and it is what the release workflow
+# matches on to avoid firing for an upstream tag.
+version = "1.3.4-enhanced.1"
 authors = ["Sven Over <sven@cord.com>", "Jozef Mokry <jozef@cord.com>"]
 description = "Submit pull requests for individual, amendable, rebaseable commits to GitHub"
-repository = "https://github.com/getcord/spr"
-homepage = "https://github.com/getcord/spr"
+repository = "https://github.com/HongboDu-at/spr"
+homepage = "https://github.com/HongboDu-at/spr"
 license = "MIT"
+# This fork must never go to crates.io under the name of the original tool.
+publish = false
 edition = "2021"
 exclude = [".github", ".gitignore"]
 
