@@ -85,8 +85,10 @@ pub async fn diff(
     gh: &mut crate::github::GitHub,
     config: &crate::config::Config,
 ) -> Result<()> {
-    // Abort right here if the local Git repository is not clean
-    git.check_no_uncommitted_changes()?;
+    // Note that spr does not need a clean worktree here. It only reads commits
+    // and writes new ones, and the commits it writes keep the tree of the
+    // commit they replace, so the worktree stays valid. `spr sync` is
+    // different: it checks out a new tree and does need a clean worktree.
 
     let mut result = Ok(());
 
