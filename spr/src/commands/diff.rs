@@ -772,6 +772,17 @@ async fn diff_impl(
         }
 
         if !pull_request_updates.is_empty() {
+            // GitHub refuses to change the base branch of a Pull Request that
+            // is part of a stack, so take it out of the stack first. The end
+            // of the run puts a stack back if the commits still form a chain.
+            if pull_request_updates.base.is_some() {
+                if let Ok(Some(stack)) =
+                    gh.find_stack_for_pull_request(pull_request.number).await
+                {
+                    let _ = gh.unstack(stack.number).await;
+                }
+            }
+
             gh.update_pull_request(pull_request.number, pull_request_updates)
                 .await?;
         }

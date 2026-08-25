@@ -87,7 +87,9 @@ Users only need to specify a base branch when creating a PR. Updating an existin
 
 `spr diff` registers the chain as a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs), so GitHub shows a stack map and re-targets the remaining PRs when the bottom one merges.
 
-This happens automatically whenever each PR's base is the branch of the PR below it. Commits based on the master branch are not a stack, and neither are chains using an intermediate base branch (`--no-cherry-pick`). Reordering a stack needs `--base`. If GitHub rejects the stack, spr warns and carries on; the PRs are still updated.
+This happens automatically whenever each PR's base is the branch of the PR below it. Commits based on the master branch are not a stack, and neither are chains using an intermediate base branch (`--no-cherry-pick`). If GitHub rejects the stack, spr warns and carries on; the PRs are still updated.
+
+Reordering a stack, or moving a PR onto a different base, needs `--base`. spr takes the PR out of its stack first, because GitHub refuses to re-target a stacked PR. GitHub has no endpoint to remove a single PR, so the whole stack is dissolved and rebuilt from whatever chain the run still covers.
 
 ### Name One Commit with the `[COMMIT]` Argument
 
