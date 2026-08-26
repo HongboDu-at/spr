@@ -248,7 +248,8 @@ impl Git {
     }
 
     /// Resolve a revision that the user typed - a commit id, a short commit
-    /// id, or a name such as `HEAD~2` - into the id of a commit.
+    /// id, or a name such as `HEAD~2` - into the id of a commit. For a full
+    /// reference name spr built, use [`Git::resolve_reference`].
     pub fn resolve_commit(&self, revision: &str) -> Result<Oid> {
         let repo = self.repo();
         let object = repo
@@ -262,6 +263,8 @@ impl Git {
         Ok(oid)
     }
 
+    /// Resolve a full reference name, such as `refs/remotes/origin/main`.
+    /// Rejects anything else; see [`Git::resolve_commit`] for user input.
     pub fn resolve_reference(&self, reference: &str) -> Result<Oid> {
         let result = self
             .repo()

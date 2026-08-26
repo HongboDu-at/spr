@@ -195,12 +195,19 @@ async fn diff_impl(
     let (base_ref, base_pull_request_number) = if let Some(base) = &opts.base {
         let diff = parse_parent_or_zero(base);
         if diff == 0 {
+            // `--base` names a branch. Fetch it, so an unknown name fails here
+            // instead of silently becoming the master branch further down.
+            let base_branch = config.new_github_branch(base);
+            Git::fetch_from_remote(&[&base_branch], &config.remote_name)
+                .await
+                .reword(format!(
+                    "Could not find branch '{base}' on the remote"
+                ))?;
+
             let base_pull_request_number_result =
                 gh.get_open_pull_request_number_for_head(base.clone()).await;
-            (
-                config.new_github_branch(base),
-                base_pull_request_number_result.ok(),
-            )
+
+            (base_branch, base_pull_request_number_result.ok())
         } else {
             let base_index = index as isize - diff;
             if base_index < 0 {
