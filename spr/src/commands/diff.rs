@@ -1016,27 +1016,10 @@ async fn update_github_stack_impl(
         );
     }
 
-    // The order changed, and GitHub has no endpoint for that. So we remove the
-    // stack and make a new one. We only do this when the stack holds exactly
-    // the Pull Requests that we have, so that we never drop a Pull Request
-    // that somebody added to the stack somewhere else. Pull Request numbers
-    // are unique, so equal length plus containment means equal sets.
-    if chain.len() == current.len()
-        && chain.iter().all(|number| current.contains(number))
-    {
-        output(
-            "🥞",
-            &format!(
-                "The order of stack #{} changed - building it again on GitHub",
-                stack.number
-            ),
-        )?;
-
-        gh.unstack(stack.number).await?;
-
-        return create_github_stack(gh, &chain).await;
-    }
-
+    // Anything else - a different order, or a Pull Request that left the
+    // stack - has no endpoint. Changing an order goes through `--base`, and
+    // that already takes the Pull Request out of its stack before it moves the
+    // base, so by the time we get here there is no stack left to rebuild.
     output(
         "⚠️",
         &format!(
