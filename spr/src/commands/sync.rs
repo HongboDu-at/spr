@@ -62,10 +62,7 @@ pub async fn sync(
     // Await PR tasks only for selected commits
     let mut pull_requests: Vec<Option<PullRequest>> = vec![None; length];
     for &i in &selected_indexes {
-        let commit = &mut prepared_commits[i];
-        if let Some(task) = commit.pull_request_task.take() {
-            pull_requests[i] = Some(task.await??);
-        }
+        pull_requests[i] = prepared_commits[i].pull_request().await?;
     }
 
     // Check which selected commits have remote changes by comparing
