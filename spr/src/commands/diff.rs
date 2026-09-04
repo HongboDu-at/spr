@@ -184,13 +184,11 @@ async fn diff_impl(
 ) -> Result<Option<StackLink>> {
     write_commit_title(prepared_commits.get_mut(index).unwrap())?;
 
-    let pull_request = if let Some(task) =
-        &mut prepared_commits.get_mut(index).unwrap().pull_request_task
-    {
-        Some(task.await??)
-    } else {
-        None
-    };
+    let pull_request = prepared_commits
+        .get_mut(index)
+        .unwrap()
+        .pull_request()
+        .await?;
 
     let (base_ref, base_pull_request_number) = if let Some(base) = &opts.base {
         let diff = parse_parent_or_zero(base);
@@ -889,8 +887,8 @@ async fn get_pull_request_for_index(
     // spr fetches a Pull Request in the background only for the commits that
     // the run knew about in advance. This commit is a base that the user chose
     // later, so fetch it now if that did not happen.
-    if let Some(task) = &mut commit.pull_request_task {
-        return task.await?;
+    if let Some(pull_request) = commit.pull_request().await? {
+        return Ok(pull_request);
     }
 
     match commit.pull_request_number {

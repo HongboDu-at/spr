@@ -98,6 +98,11 @@ pub struct PreparedCommit {
     pub message: MessageSectionsMap,
     pub pull_request_number: Option<u64>,
     pub pull_request_task: Option<JoinHandle<Result<PullRequest>>>,
+    /// The result of `pull_request_task`, once it has been awaited. A
+    /// `JoinHandle` can only be awaited once, but the same commit can be
+    /// looked at twice in one run (as itself, and as the base of a later
+    /// commit), so the fetched Pull Request is kept here.
+    pull_request: Option<PullRequest>,
 }
 
 /// Which commits spr fetches the Pull Request of. A Pull Request costs a
@@ -116,6 +121,18 @@ pub enum PullRequestFilter {
 }
 
 impl PreparedCommit {
+    /// The Pull Request that spr fetched for this commit in the background,
+    /// awaiting the fetch if that has not happened yet. Returns `None` for a
+    /// commit that has no Pull Request, or whose Pull Request this run did not
+    /// ask GitHub for.
+    pub async fn pull_request(&mut self) -> Result<Option<PullRequest>> {
+        if let Some(task) = self.pull_request_task.take() {
+            self.pull_request = Some(task.await??);
+        }
+
+        Ok(self.pull_request.clone())
+    }
+
     /// The title of the commit, or a placeholder if it has none.
     pub fn title(&self) -> &str {
         self.message
@@ -385,6 +402,7 @@ impl Git {
             message,
             pull_request_number,
             pull_request_task,
+            pull_request: None,
         })
     }
 
