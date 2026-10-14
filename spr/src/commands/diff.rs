@@ -315,6 +315,8 @@ async fn diff_impl(
                 base_pull_request_number
             ),
         );
+    } else {
+        message.remove(&MessageSection::BasePR);
     }
 
     // Determine the trees the Pull Request branch and the base branch should

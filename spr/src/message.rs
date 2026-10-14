@@ -58,7 +58,9 @@ pub fn parse_message(
     msg: &str,
     top_section: MessageSection,
 ) -> MessageSectionsMap {
-    let regex = lazy_regex::regex!(r#"^\s*([\w\s]+?)\s*:\s*(.*)$"#);
+    // The BasePR label is written as "<hr>Depends On", so the optional "<hr>"
+    // prefix must be accepted for that section to round-trip.
+    let regex = lazy_regex::regex!(r#"^\s*(?:<hr>\s*)?([\w\s]+?)\s*:\s*(.*)$"#);
 
     let mut section = top_section;
     let mut lines_in_section = Vec::<&str>::new();
@@ -322,5 +324,68 @@ Reviewer:    a, b, c"#,
             ]
             .into()
         );
+    }
+
+    // The BasePR text that `spr diff` puts into the commit message.
+    const BASE_PR: &str =
+        "\n- #123 (powered by [spr-enhanced](https://go/spr-enhanced))";
+
+    fn sections_with_base_pr() -> MessageSectionsMap {
+        [
+            (MessageSection::Title, "Hello".to_string()),
+            (MessageSection::Summary, "Summary text".to_string()),
+            (MessageSection::TestPlan, "testzzz".to_string()),
+            (MessageSection::BasePR, BASE_PR.to_string()),
+            (
+                MessageSection::PullRequest,
+                "https://github.com/o/r/pull/456".to_string(),
+            ),
+        ]
+        .into()
+    }
+
+    #[test]
+    fn test_base_pr_round_trip() {
+        let message = build_commit_message(&sections_with_base_pr());
+
+        let mut parsed = parse_message(&message, MessageSection::Title);
+        assert_eq!(
+            parsed.get(&MessageSection::Summary).map(String::as_str),
+            Some("Summary text")
+        );
+        assert_eq!(
+            parsed.get(&MessageSection::TestPlan).map(String::as_str),
+            Some("testzzz")
+        );
+        assert_eq!(
+            parsed.get(&MessageSection::BasePR).map(String::as_str),
+            Some(BASE_PR.trim())
+        );
+
+        // `spr diff` inserts the BasePR section again every time it runs. That
+        // must replace the section rather than add another copy.
+        parsed.insert(MessageSection::BasePR, BASE_PR.to_string());
+        assert_eq!(build_commit_message(&parsed), message);
+    }
+
+    #[test]
+    fn test_parse_duplicate_base_pr() {
+        // Older versions could not parse the BasePR section back, so every
+        // `spr diff` left one more copy of it at the end of the Summary.
+        let message = build_commit_message(&sections_with_base_pr());
+        let duplicated = message.replacen(
+            "\n\n<hr>Depends On:",
+            &format!("\n\n<hr>Depends On:\n{BASE_PR}\n\n<hr>Depends On:"),
+            1,
+        );
+
+        let mut parsed = parse_message(&duplicated, MessageSection::Title);
+        assert_eq!(
+            parsed.get(&MessageSection::Summary).map(String::as_str),
+            Some("Summary text")
+        );
+
+        parsed.insert(MessageSection::BasePR, BASE_PR.to_string());
+        assert_eq!(build_commit_message(&parsed), message);
     }
 }
