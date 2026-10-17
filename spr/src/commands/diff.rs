@@ -161,8 +161,8 @@ pub async fn diff(
     );
 
     // Now that all Pull Requests exist and have the right base branches, tell
-    // GitHub about the stack they form.
-    if result.is_ok() {
+    // GitHub about the stack they form, unless `spr.nativeStack` is off.
+    if result.is_ok() && config.native_stack {
         update_github_stack(gh, &stack_links).await;
     }
 
@@ -805,6 +805,8 @@ async fn diff_impl(
             // GitHub refuses to change the base branch of a Pull Request that
             // is part of a stack, so take it out of the stack first. The end
             // of the run puts a stack back if the commits still form a chain.
+            // This runs even with `spr.nativeStack` off, because a stack made
+            // earlier or in the GitHub UI blocks the base change just the same.
             if pull_request_updates.base.is_some() {
                 if let Ok(Some(stack)) =
                     gh.find_stack_for_pull_request(pull_request.number).await

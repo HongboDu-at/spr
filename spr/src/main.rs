@@ -140,7 +140,7 @@ pub async fn spr() -> Result<()> {
         .ok()
         .unwrap_or(false);
 
-    let config = spr::config::Config::new(
+    let mut config = spr::config::Config::new(
         github_owner,
         github_repo,
         github_remote_name,
@@ -149,6 +149,8 @@ pub async fn spr() -> Result<()> {
         require_approval,
         require_test_plan,
     );
+    config.native_stack =
+        git_config.get_bool("spr.nativeStack").ok().unwrap_or(true);
 
     let git = spr::git::Git::new(repo);
 

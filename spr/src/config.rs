@@ -18,6 +18,8 @@ pub struct Config {
     pub branch_prefix: String,
     pub require_approval: bool,
     pub require_test_plan: bool,
+    /// Register stacked Pull Requests as a native GitHub stack.
+    pub native_stack: bool,
 }
 
 impl Config {
@@ -43,6 +45,7 @@ impl Config {
             branch_prefix,
             require_approval,
             require_test_plan,
+            native_stack: true,
         }
     }
 

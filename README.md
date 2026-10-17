@@ -24,7 +24,7 @@ https://getcord.github.io/spr/. It describes the original behaviour; see
 | Difference | Detail |
 |---|---|
 | No intermediate base branch | PR2 is based on PR1's branch. [More](#directly-use-pr1-as-base-branch-of-pr2) |
-| Native GitHub stacks | The chain is registered with GitHub. [More](#native-github-stacks) |
+| Native GitHub stacks | The chain is registered with GitHub. Off with `spr.nativeStack`. [More](#native-github-stacks) |
 | `Depends On` in the PR body | Links the stacked PR to its base. [More](#track-base-pr-in-the-stacked-pr-on-github) |
 | `--base` | Base a PR on any branch or lower commit. [More](#override-base-branch-via-a-new---base-option) |
 | Base branch persistence | Pass `--base` once, not on every update. [More](#base-branch-persistence) |
@@ -90,6 +90,8 @@ Users only need to specify a base branch when creating a PR. Updating an existin
 This happens automatically whenever each PR's base is the branch of the PR below it. Commits based on the master branch are not a stack, and neither are chains using an intermediate base branch (`--no-cherry-pick`). If GitHub rejects the stack, spr warns and carries on; the PRs are still updated.
 
 Reordering a stack, or moving a PR onto a different base, needs `--base`. spr takes the PR out of its stack first, because GitHub refuses to re-target a stacked PR. GitHub has no endpoint to remove a single PR, so the whole stack is dissolved and rebuilt from whatever chain the run still covers.
+
+To turn this off, run `git config spr.nativeStack false` in a repository, or add `--global` for all of them. spr then never creates or extends a stack, but still takes a PR out of an existing one when `--base` changes its base.
 
 ### Name One Commit with the `[COMMIT]` Argument
 
