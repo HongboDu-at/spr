@@ -442,6 +442,20 @@ impl Git {
         Ok(repo.cherrypick_commit(&commit, &base_commit, 0, None)?)
     }
 
+    /// The tree of a plain merge of two commits, or `None` if they conflict.
+    pub fn merge_tree(&self, ours: Oid, theirs: Oid) -> Result<Option<Oid>> {
+        let repo = self.repo();
+        let ours = repo.find_commit(ours)?;
+        let theirs = repo.find_commit(theirs)?;
+        let mut index = repo.merge_commits(&ours, &theirs, None)?;
+
+        if index.has_conflicts() {
+            return Ok(None);
+        }
+
+        Ok(Some(index.write_tree_to(&repo)?))
+    }
+
     pub fn write_index(&self, mut index: git2::Index) -> Result<Oid> {
         Ok(index.write_tree_to(&self.repo())?)
     }
@@ -563,5 +577,49 @@ impl Git {
                 "There are uncommitted changes. Stash or amend them first",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Commit `x` with `content` on top of `parent`.
+    fn commit(
+        repo: &git2::Repository,
+        parent: Option<Oid>,
+        content: &str,
+    ) -> Oid {
+        let blob = repo.blob(content.as_bytes()).unwrap();
+        let mut tree = repo.treebuilder(None).unwrap();
+        tree.insert("x", blob, 0o100644).unwrap();
+        let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@t").unwrap();
+        let parents = parent.map(|p| repo.find_commit(p).unwrap());
+        let parents: Vec<_> = parents.iter().collect();
+        repo.commit(None, &sig, &sig, "c", &tree, &parents).unwrap()
+    }
+
+    #[test]
+    fn test_merge_tree() {
+        let dir = std::env::temp_dir()
+            .join(format!("spr-merge-tree-{}", std::process::id()));
+        let repo = git2::Repository::init(&dir).unwrap();
+
+        let base = commit(&repo, None, "one\ntwo\nthree\n");
+        let pr = commit(&repo, Some(base), "PR\ntwo\nthree\n");
+        let clean = commit(&repo, Some(base), "one\ntwo\nUP\n");
+        let conflict = commit(&repo, Some(base), "UP\ntwo\nthree\n");
+        let git = Git::new(repo);
+
+        let merged = git.merge_tree(pr, clean).unwrap().unwrap();
+        let repo = git.repo();
+        let blob = repo.find_tree(merged).unwrap().get_name("x").unwrap().id();
+        assert_eq!(repo.find_blob(blob).unwrap().content(), b"PR\ntwo\nUP\n");
+        drop(repo);
+
+        assert_eq!(git.merge_tree(pr, conflict).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

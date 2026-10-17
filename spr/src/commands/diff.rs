@@ -672,6 +672,29 @@ async fn diff_impl(
         }
     }
 
+    // GitHub drops merge commits when it rebases a native stack, so a merge
+    // must hold only the merge. Push the plain merge, then the real change as
+    // its own commit. If the plain merge conflicts, keep one commit: GitHub's
+    // rebase then conflicts too, so nothing is lost silently.
+    if base_branch.is_none() && pr_commit_parents.len() == 2 {
+        if let Some(merge_tree) =
+            git.merge_tree(pr_commit_parents[0], pr_commit_parents[1])?
+        {
+            if merge_tree != new_head_tree {
+                let merge_commit = git.create_derived_commit(
+                    local_commit.oid,
+                    &format!(
+                        "[𝘀𝗽𝗿] changes introduced through rebase\n\nCreated using spr {}",
+                        env!("CARGO_PKG_VERSION"),
+                    ),
+                    merge_tree,
+                    &pr_commit_parents,
+                )?;
+                pr_commit_parents = vec![merge_commit];
+            }
+        }
+    }
+
     // Create the new commit
     let pr_commit = git.create_derived_commit(
         local_commit.oid,
